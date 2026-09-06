@@ -1,0 +1,26 @@
+# Rust
+/target
+Cargo.lock.bak
+
+# NEVER commit original vendor binaries, firmware, SDK installers, or disassembly output.
+# See docs/clean-room/POLICY.md
+/vendor-original/
+/disasm/
+*.sys
+*.vxd
+*.dll
+*.exe
+*.bin
+*.iso
+*.img
+
+# Captures may be large; keep them in an external store and reference by hash.
+/captures/**/*.sr
+/captures/**/*.vcd
+/captures/**/*.pcapng
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
