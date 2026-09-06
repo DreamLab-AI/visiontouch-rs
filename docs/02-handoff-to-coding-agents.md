@@ -7,7 +7,7 @@ Read `README.md`, `docs/01-verdict.md`, and `docs/clean-room/POLICY.md` before w
 1. **No vendor artefacts in the repo.** No binaries, firmware, SDK headers, manual text, screenshots of documentation, or decompiler output. `.gitignore` catches the obvious cases; judgement covers the rest.
 2. **No verbatim vendor strings, identifiers, comments, or tables.** Constants dictated by hardware are described functionally with a provenance ID.
 3. **Spec before code.** Protocol behaviour goes in `docs/spec/` first, in our own words, with `PROVENANCE.md` rows. Rust follows the spec, never a trace directly.
-4. **No decompilation without a `DECOMPILATION-LOG.md` entry** stating why observation failed. Default answer is "don't".
+4. **No decompilation without a `DECOMPILATION-LOG.md` entry** stating why observation failed. Default answer is "don't". If it does become necessary, the Linux-native toolchain is in `docs/research/windows-binary-analysis-on-linux.md`.
 5. **Own names.** No "phantom", "sensable", "ghost", or "openhaptics" in crate names, binary names, module paths, or identifiers. Documentation may use them referentially.
 6. **Safety code is not optional.** Deadline watchdog, force clamp, and amp-enable interlock ship in the first version of `device`, before any force is commanded on real hardware.
 

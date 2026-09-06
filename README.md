@@ -21,6 +21,7 @@ This repository is not affiliated with, endorsed by, or derived from code belong
 | [docs/research/capture-strategy.md](docs/research/capture-strategy.md) | The three observation routes, in order of preference |
 | [docs/research/linux-parport-rust.md](docs/research/linux-parport-rust.md) | ppdev, PCIe cards, real-time on CachyOS, proposed Rust crate layout |
 | [docs/research/re-tooling.md](docs/research/re-tooling.md) | Ghidra, Binary Ninja, emulators, logic analysers |
+| [docs/research/windows-binary-analysis-on-linux.md](docs/research/windows-binary-analysis-on-linux.md) | Linux-native toolchain for the Windows `.sys`/`.vxd`/DLL artefacts, if decompilation is ever needed |
 | [docs/clean-room/POLICY.md](docs/clean-room/POLICY.md) | The rules we work under |
 | [docs/clean-room/PROVENANCE.md](docs/clean-room/PROVENANCE.md) | Where every fact came from (append-only) |
 | [docs/hardware/identification.md](docs/hardware/identification.md) | Fill-in sheet for the physical device and host port |
