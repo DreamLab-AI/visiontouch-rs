@@ -18,6 +18,24 @@ property is understood to have passed SensAble → Geomagic (2012) → 3D System
   connected, and the kernel enumerates the port.
 - No code yet. This repository currently holds research and legal notes only.
 
+## Release posture
+
+**Private hardware-archaeology project. No external software release is
+planned.** The intended output is an academic paper describing the device,
+its interface, and the reimplementation. This matters legally:
+
+- Without distribution, most copyright exposure collapses to private study of
+  a lawfully owned copy, which UK CDPA s50BA / EU Art 5(3) expressly permit.
+- Non-commercial research fair dealing (CDPA s29) is additionally available.
+- The one trap: CDPA s50B(3) restricts *communicating* information obtained
+  by **decompilation** beyond what interoperability needs. Information
+  obtained by **observation** carries no such restriction. So anything that
+  goes in the paper must be traceable (via `docs/clean-room/PROVENANCE.md`)
+  to PUBLIC, OWNER, OBSERVE or BLACKBOX sources, not DECOMPILE.
+- Patents are not infringed by private, non-commercial experimental use in
+  the UK (Patents Act 1977 s60(5)(a),(b)), and the relevant patents should
+  be expired anyway. To be confirmed in `docs/legal/`.
+
 ## Goals
 
 1. Establish, **before any reverse engineering**, a written legal position and
