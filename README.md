@@ -6,13 +6,15 @@ This repository is not affiliated with, endorsed by, or derived from code belong
 
 ## Status
 
-**Research phase. No code yet.** The legal analysis, tooling survey, Linux/Rust groundwork, and device research are done; the next step is device identification and the first protocol capture.
+**Research phase complete; verdict is to proceed.** See [docs/01-verdict.md](docs/01-verdict.md). Implementation is starting from [docs/02-handoff-to-coding-agents.md](docs/02-handoff-to-coding-agents.md). No protocol code exists yet; the first deliverables are the trace decoder, the ppdev HAL, and a port probe.
 
 ## Read in this order
 
 | Doc | What it is |
 |---|---|
 | [docs/00-charter.md](docs/00-charter.md) | Scope, goals, non-goals, release posture |
+| [docs/01-verdict.md](docs/01-verdict.md) | **The decision: proceed, observation-first, and why** |
+| [docs/02-handoff-to-coding-agents.md](docs/02-handoff-to-coding-agents.md) | Non-negotiables, first tasks, and layout for implementers |
 | [docs/legal/POSITION.md](docs/legal/POSITION.md) | Our applied legal position (UK-based, private, paper as output) |
 | [docs/legal/landscape.md](docs/legal/landscape.md) | The full UK / EU / US legal research with citations |
 | [docs/research/device-phantom-parallel.md](docs/research/device-phantom-parallel.md) | What the device is, how it interfaces, what prior art exists |
