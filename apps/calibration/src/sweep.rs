@@ -9,6 +9,10 @@ pub const MAX_POINTS: usize = 20_000;
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Sweep {
     pub points_model_m: Vec<V>,
+    /// Exact observed axis limits [xmin, xmax, ymin, ymax, zmin, zmax].
+    /// Unlike the display cloud, these include observations within an existing cell.
+    /// They are not additional support points or a reachable-volume certificate.
+    pub extrema_model_m: Option<[f64; 6]>,
     pub zero_model_m: Option<V>,
     pub path_review: Option<PathReview>,
     #[serde(skip)]
@@ -26,10 +30,24 @@ pub struct PathReview {
 }
 impl Sweep {
     /// Retain one measured point per 2 mm cell; never manufacture interior points.
+    /// Update exact extrema even if no point is retained. The return value reports
+    /// cloud insertion only, not whether the observation changed an extremum.
     pub fn record(&mut self, p: V) -> bool {
-        if p.iter().any(|x| !x.is_finite() || x.abs() > 10.)
-            || self.points_model_m.len() >= MAX_POINTS
-        {
+        if p.iter().any(|x| !x.is_finite() || x.abs() > 10.) {
+            return false;
+        }
+        let old = self.extrema_model_m;
+        let edges = self
+            .extrema_model_m
+            .get_or_insert([p[0], p[0], p[1], p[1], p[2], p[2]]);
+        for i in 0..3 {
+            edges[2 * i] = edges[2 * i].min(p[i]);
+            edges[2 * i + 1] = edges[2 * i + 1].max(p[i]);
+        }
+        if old != self.extrema_model_m {
+            self.path_review = None;
+        }
+        if self.points_model_m.len() >= MAX_POINTS {
             return false;
         }
         let cell = p.map(|x| (x / CELL_M).floor() as i32);
@@ -42,22 +60,7 @@ impl Sweep {
         }
     }
     pub fn extrema(&self) -> Option<[Option<f64>; 6]> {
-        let first = self.points_model_m.first()?;
-        let mut edges = [
-            Some(first[0]),
-            Some(first[0]),
-            Some(first[1]),
-            Some(first[1]),
-            Some(first[2]),
-            Some(first[2]),
-        ];
-        for p in &self.points_model_m {
-            for i in 0..3 {
-                edges[2 * i] = Some(edges[2 * i].unwrap().min(p[i]));
-                edges[2 * i + 1] = Some(edges[2 * i + 1].unwrap().max(p[i]));
-            }
-        }
-        Some(edges)
+        self.extrema_model_m.map(|edges| edges.map(Some))
     }
     pub fn display_bounds(&self) -> Option<[[f64; 2]; 3]> {
         let e = self.extrema()?;
@@ -141,13 +144,41 @@ mod tests {
         ] {
             assert!(s.record(p));
         }
-        assert!(!s.record([0.0201, 0., 0.]));
+        assert!(!s.record([0.02, 0., 0.]));
         assert!(!s.record([f64::NAN, 0., 0.]));
         assert_eq!(s.dimensions_mm(), [40.; 3]);
         assert!(!s.near_sample([0.02; 3])); // enclosing-box corner is not observed
         assert!(s.choose_zero([0.; 3]).is_ok());
         assert!(s.choose_zero([0.019, 0., 0.]).is_err());
         assert_eq!(s.display_bounds(), Some([[-20., 20.]; 3]));
+    }
+    #[test]
+    fn display_thinning_preserves_exact_extrema_without_filling_support() {
+        let mut s = Sweep::default();
+        assert!(s.record([0.0201, -0.0201, 0.]));
+        // Same cells, but a further extreme on both positive and negative axes.
+        assert!(!s.record([0.0219, -0.0219, 0.0019]));
+        let expected = [0.0201, 0.0219, -0.0219, -0.0201, 0., 0.0019];
+        assert_eq!(s.extrema_model_m, Some(expected));
+        assert_eq!(s.extrema(), Some(expected.map(Some)));
+        assert_eq!(s.points_model_m, vec![[0.0201, -0.0201, 0.]]);
+        let exported = serde_json::to_value(&s).unwrap();
+        assert_eq!(exported["extrema_model_m"], serde_json::json!(expected));
+        for bad in [[f64::NAN; 3], [f64::INFINITY; 3], [10.1; 3]] {
+            assert!(!s.record(bad));
+            assert_eq!(s.extrema_model_m, Some(expected));
+        }
+    }
+    #[test]
+    fn changed_extremum_invalidates_review_even_without_new_cloud_point() {
+        let mut s = Sweep::default();
+        s.record([0.; 3]);
+        s.zero_model_m = Some([0.; 3]);
+        s.review_path([0.; 3]).unwrap();
+        assert!(s.path_review.is_some());
+        assert!(!s.record([0.001; 3]));
+        assert!(s.path_review.is_none());
+        assert_eq!(s.points_model_m.len(), 1);
     }
     #[test]
     fn changing_evidence_or_zero_invalidates_path_review() {
@@ -179,6 +210,9 @@ mod tests {
         for i in 0..MAX_POINTS + 1 {
             s.record([(i % 200) as f64 * 0.003, (i / 200) as f64 * 0.003, 0.]);
         }
+        assert_eq!(s.points_model_m.len(), MAX_POINTS);
+        assert!(!s.record([1.; 3]));
+        assert_eq!(s.extrema_model_m, Some([0., 1., 0., 1., 0., 1.]));
         assert_eq!(s.points_model_m.len(), MAX_POINTS);
     }
 }

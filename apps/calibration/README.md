@@ -27,6 +27,8 @@ hardware.
    capture the bottom reference. This is an operator reference, not a hard stop.
 2. Select **Start / continue sweep**. Move through comfortable arcs at multiple
    heights and depths. Points are retained once per 2 mm model cell, up to 20,000.
+   Exact observed extrema are tracked separately, including movement within an
+   existing cell; display thinning does not shrink the recorded axis spans.
 3. Select **Finish sweep**, move to a comfortable central pose, hold still and
    **Record this pose as zero**. Extrema and coordinate spans are derived by the
    app. Coordinates default to model millimetres about this chosen zero.

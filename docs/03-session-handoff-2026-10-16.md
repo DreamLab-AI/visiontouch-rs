@@ -1,6 +1,17 @@
 # Session handoff — 2026-10-16
 
-## Latest continuation — live route teaching, offline verified
+## Latest continuation — exact sweep extrema
+
+The prior turn delivered and pushed live route teaching; it was progress. This
+continuation found and fixed loss of observed travel inside an already retained
+2 mm display cell. Sweep extrema now accumulate independently in constant time,
+are exported as `extrema_model_m`, and invalidate prior path review when changed.
+No enclosing-box corner is inserted into sample support. The point cap remains
+20,000; invalid observations cannot alter bounds. Calibration tests (17) and
+Clippy pass, including regression checks for thinning, export and the storage cap.
+Hardware remains off; no physical validation is claimed.
+
+## Earlier continuation — live route teaching, offline verified
 
 This section supersedes the initial sweep force-lock notes below. Hardware remains
 powered off; no device was opened during this continuation. Owner authorized
