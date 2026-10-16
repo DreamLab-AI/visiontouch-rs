@@ -142,3 +142,33 @@ an optional outer comparison bound, never as motor authority. Support orbit,
 pose replay, adjustable link lengths and GLB export. No hardware interface in
 this viewer. A stable final resting pose labelled by the owner is provisional,
 not an automatic mechanical-origin calibration.
+
+## Sample-supported path review
+
+Provide a reusable, hardware-free workspace geometry crate. Its evidence region
+is the union of fixed-radius neighbourhoods of observed points, reduced by an
+explicit evidence margin. Defaults are a 5 mm model support radius and 2 mm model
+margin (3 mm effective proximity). These are independent review parameters,
+not measured clearance, manufacturer limits or proof of physical safety.
+Do not fill convex interiors or bridge unsupported gaps.
+
+Check a proposed straight segment analytically: intersect the complete segment
+with each evidence sphere, sort the covered parameter intervals, and require
+their union to cover [0,1]. Checking only endpoints or fixed-spaced test points is
+insufficient. Return the first unsupported interval for display. Non-finite,
+out-of-range or oversized inputs fail closed. An explicit conservative numerical
+inset avoids accepting marginal floating-point boundary contacts.
+
+The native app may review a straight path from the current still pose to the
+manually recorded zero while motors are off. Show the path and its first gap;
+export support radius, margin, sample count and the exact reviewed endpoints.
+Any added observation or changed zero invalidates the review. Review results
+are evidence about model-sample proximity, never persisted arming authority.
+Sweep motor control stays locked until the full physical/temporal validation
+workflow is complete. Preserve the difference between geometry support and a
+physically validated usable region in both UI and crate docs.
+
+The explicitly observed still start and manually observed zero are included as
+support observations even if the sweep's spatial deduplication/storage cap did
+not retain a cell there. Export the resulting support observation count. These
+endpoint observations do not fill any intervening unknown interval.
