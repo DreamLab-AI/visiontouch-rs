@@ -633,11 +633,7 @@ fn interface(app: &mut App, ctx: &egui::Context) -> (Rect, bool, bool) {
                     }
                     if ui.add_enabled(!locked && !app.snapshot.sweeping && !app.snapshot.sweep.points_model_m.is_empty(),egui::Button::new("Export sweep evidence")).clicked(){app.send(Command::SaveCalibration(app.volume.clone()));}
                     ui.label("Coordinates use model millimetres about the chosen zero. Until then, the display centre is provisional.");
-                    ui.label("Move to a still starting pose 5–500 model mm from zero. Teach a slow straight approach and return, keeping within 2 mm of the gold line. Stop or the pen button cancels.");
-                    if ui.add_enabled(!locked && app.snapshot.connected && !app.snapshot.sweeping && app.snapshot.stable && app.snapshot.sweep.zero_model_m.is_some(), egui::Button::new("Teach approach: to zero and back")).clicked(){app.send(Command::TeachApproach);}
-                    if app.snapshot.teaching {ui.label(RichText::new(&app.snapshot.teaching_instruction).strong().color(AMBER));}
-                    if app.snapshot.approach_ready {ui.label(RichText::new(format!("Live route confirmed · {} s remaining · pilot cap 0.1 model N",app.snapshot.approach_remaining_s)).color(ACCENT));}
-                    ui.label(RichText::new("Tracing records hand-guided motion; it does not measure force or prove thermal safety. Zero moves must start at the taught starting pose.").color(AMBER));
+                    ui.label("For a powered return, use Record zero & start route in the right panel. Straight-path review is optional analysis only.");
                 });
             } else {
             card(ui,"02 / ENTER YOUR WORKING COORDINATES",|ui|{
@@ -681,7 +677,20 @@ fn interface(app: &mut App, ctx: &egui::Context) -> (Rect, bool, bool) {
     });
     egui::SidePanel::right("experiments").exact_width(316.).resizable(false).frame(egui::Frame::new().fill(Color32::from_rgb(15,23,33)).inner_margin(14)).show(ctx,|ui|{
         egui::ScrollArea::vertical().id_salt("experiment_scroll").show(ui,|ui|{
-            card(ui,"04 / CHOOSE A HELD EXPERIMENT",|ui|{
+            if !app.demo && app.snapshot.sweep_mode {
+                card(ui,"04 / RECORD A RETURN ROUTE · MOTORS OFF",|ui|{
+                    ui.label("Place the pen at your comfortable working zero and hold still. Start recording, then move freely along a comfortable path to the pose you want to start from.");
+                    if ui.add_enabled(!locked && app.snapshot.connected && app.snapshot.stable && !app.snapshot.sweeping, egui::Button::new("Record zero & start route")).clicked(){app.send(Command::TeachApproach);}
+                    ui.label("At the starting pose, hold still and click Finish. The slow zero move will follow your recorded path backwards; no straight-line tracing or return leg needed.");
+                    if ui.add_enabled(app.snapshot.teaching && app.snapshot.stable, egui::Button::new("Finish route at this pose")).clicked(){app.send(Command::FinishTeaching);}
+                    if app.snapshot.teaching {ui.label(RichText::new(&app.snapshot.teaching_instruction).color(AMBER));}
+                    if !app.snapshot.route_status.is_empty(){ui.label(RichText::new(&app.snapshot.route_status).color(if app.snapshot.approach_ready {ACCENT}else{AMBER}));}
+                    if app.snapshot.approach_ready {ui.label(format!("{} s remaining · {} return points · 0.1 model N cap",app.snapshot.approach_remaining_s,app.snapshot.return_route.len()));}
+                    ui.label(RichText::new("Stop / Escape / pen button cancels. Route recording does not enable force or measure physical clearance.").size(11.).color(MUTED));
+                    if ui.add_enabled(!app.snapshot.teaching && !app.snapshot.active && !app.snapshot.sweeping, egui::Button::new("Export route / diagnostic evidence")).clicked(){app.send(Command::SaveCalibration(app.volume.clone()));}
+                });
+            }
+            card(ui,"05 / CHOOSE A HELD EXPERIMENT",|ui|{
                 let old=app.test;
                 ui.add_enabled_ui(!locked,|ui|{
                     egui::ComboBox::from_id_salt("test").selected_text(app.test.name()).width(ui.available_width()-8.).show_ui(ui,|ui|{
@@ -690,7 +699,7 @@ fn interface(app: &mut App, ctx: &egui::Context) -> (Rect, bool, bool) {
                     });
                 });
                 if old!=app.test{app.reset_effect();}
-                ui.label(match app.test{Test::Zero=>"Start still inside the mapped volume. Hold to move slowly to zero; apply gentle resistance to observe the bounded response and stall stop.",Test::Object(k)=>k.instructions()});
+                ui.label(match app.test{Test::Zero=>"Start still at the recorded route endpoint. Hold to return slowly to zero; release to stop. Advanced box calibration uses a straight path.",Test::Object(k)=>k.instructions()});
                 ui.add_enabled_ui(!locked,|ui|{
                     if matches!(app.test,Test::Zero){ui.add(egui::Slider::new(&mut app.settings.speed_mm_s,0.5..=5.).text("mm/s").fixed_decimals(1));}
                     let cap=if app.snapshot.sweep_mode {teaching::PILOT_FORCE_N}else{haptics_device::MAX_FORCE_N};
@@ -701,7 +710,7 @@ fn interface(app: &mut App, ctx: &egui::Context) -> (Rect, bool, bool) {
                 let label=if app.snapshot.active {"HOLDING · RELEASE TO STOP"}else if app.demo {"HOLD TO SIMULATE · SPACE"}else {"HOLD TO ENABLE · SPACE"};
                 let response=ui.add_enabled(ready||app.held,egui::Button::new(RichText::new(label).strong().color(Color32::from_rgb(12,34,30))).fill(if app.snapshot.active {AMBER}else{ACCENT}).sense(egui::Sense::click_and_drag()).min_size(egui::vec2(ui.available_width(),41.)));
                 button_hold=response.is_pointer_button_down_on();
-                if !ready {ui.label(RichText::new(if app.snapshot.sweep_mode {"Requires fresh route teaching, a still supported pose, and return to the taught start for zero moves."} else {"Requires live samples, stable pen and all six valid captures."}).size(11.).color(AMBER));}
+                if !ready {ui.label(RichText::new(if app.snapshot.sweep_mode {"Record a route, finish still at its starting pose, then choose a held experiment."} else {"Requires live samples, stable pen and all six valid captures."}).size(11.).color(AMBER));}
                 ui.label(RichText::new("Release / Escape / Stop / pen button: output off. Each hold starts a fresh attempt.").size(11.).color(MUTED));
                 ui.horizontal(|ui|{
                     if ui.add_enabled(!locked,egui::Button::new("Reset scene")).clicked(){app.reset_effect();app.notice="Scene state resets at the next held attempt; simulation preview reset.".into();}
@@ -902,6 +911,14 @@ async fn main() {
             break;
         }
         app.poll();
+        if sweep_smoke && frame == 60 {
+            // Render a curved recorded return without creating live authorization.
+            app.snapshot.return_route =
+                std::sync::Arc::new(vec![[0.02, 0.08, 0.], [0.02, 0.06, 0.], [0., 0.06, 0.]]);
+            std::sync::Arc::make_mut(&mut app.snapshot.sweep).path_review = None;
+            app.snapshot.route_status =
+                "OFFLINE curved-route preview · no live authorization".into();
+        }
         if smoke {
             if frame == 0 {
                 let mut incomplete = app.volume.clone();
@@ -998,7 +1015,7 @@ async fn main() {
             assert!(app.worker.is_none());
             assert!(!app.ready());
             println!(
-                "Sweep graphics smoke passed: cloud, bounds, chosen zero, input-only UI and force lock; no device opened."
+                "Sweep graphics smoke passed: cloud, bounds, chosen zero, freehand controls, curved return route and force lock; no device opened."
             );
             break;
         }

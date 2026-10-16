@@ -328,6 +328,13 @@ pub fn draw(
             }
         }
     }
+    for pair in s.return_route.windows(2) {
+        draw_line_3d(
+            point(volume, pair[0]),
+            point(volume, pair[1]),
+            Color::from_rgba(229, 194, 126, 255),
+        );
+    }
     if let Some(review) = &s.sweep.path_review {
         let start = point(volume, review.start_model_m);
         let end = point(volume, review.zero_model_m);

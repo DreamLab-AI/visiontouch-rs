@@ -1,5 +1,22 @@
 # Session handoff — 2026-10-16
 
+## Latest continuation — freehand route replaces difficult teaching
+
+Owner reported that the straight out-and-back method needs replacement. The
+new right-panel workflow records the current stable interior pose as zero,
+records a freehand path away from it, and finishes explicitly at a still start
+pose. Powered zero return follows the reversed observed polyline. Curves are
+accepted; no return leg or narrow straight corridor needs to be traced. Capture
+allows up to 100 ms input-only intervals with a separate 3 mm jump bound; powered
+limits remain unchanged. Exports retain route method, order and diagnostic status.
+
+Tests cover bent-route traversal, no shortcuts through unsupported space, nearby
+loops, premature Finish, input jumps/gaps and existing authority expiry/caps.
+The old running app has not been replaced during editing: restart is needed to
+use the new controls and clears live reference/authority. Owner exports from the
+current session remain under captures/calibration. Fresh calibration is required
+after restarting; saved data cannot silently restore live authority.
+
 ## Latest continuation — acceptance audit
 
 The documentation turn was progress. The requirement-by-requirement audit is in

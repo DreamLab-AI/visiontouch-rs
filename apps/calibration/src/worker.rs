@@ -40,6 +40,7 @@ pub enum Command {
     SweepZero,
     ReviewSweepPath,
     TeachApproach,
+    FinishTeaching,
     SaveCalibration(Volume),
     Start(Volume, Settings, Test),
     Stop,
@@ -62,6 +63,8 @@ pub struct Snapshot {
     pub sweeping: bool,
     pub teaching: bool,
     pub teaching_instruction: String,
+    pub route_status: String,
+    pub return_route: Arc<Vec<V>>,
     pub approach_ready: bool,
     pub approach_start: Option<V>,
     pub approach_remaining_s: u64,
@@ -93,6 +96,8 @@ impl Default for Snapshot {
             sweeping: false,
             teaching: false,
             teaching_instruction: String::new(),
+            route_status: String::new(),
+            return_route: Arc::new(Vec::new()),
             approach_ready: false,
             approach_start: None,
             approach_remaining_s: 0,
@@ -185,14 +190,24 @@ impl Approach {
         points.extend([evidence.start_model_m, evidence.zero_model_m]);
         let cloud = haptics_workspace::EvidenceCloud::new(points, Default::default())
             .map_err(|e| e.to_string())?;
-        if cloud
-            .review_segment(evidence.start_model_m, evidence.zero_model_m)
-            .map_err(|e| e.to_string())?
-            != haptics_workspace::SegmentReview::Supported
+        if evidence.return_route_model_m.first() != Some(&evidence.start_model_m)
+            || evidence.return_route_model_m.last() != Some(&evidence.zero_model_m)
+            || evidence.return_route_model_m.len() < 2
         {
-            return Err(
-                "Taught route still has unsupported gaps; repeat the trace more closely.".into(),
-            );
+            return Err("Recorded route is empty.".into());
+        }
+        // Each pair is supported by its own explicitly observed endpoints. This
+        // is linear in route length and never substitutes a start-to-zero chord.
+        for pair in evidence.return_route_model_m.windows(2) {
+            let local = haptics_workspace::EvidenceCloud::new(pair.to_vec(), Default::default())
+                .map_err(|e| e.to_string())?;
+            if local
+                .review_segment(pair[0], pair[1])
+                .map_err(|e| e.to_string())?
+                != haptics_workspace::SegmentReview::Supported
+            {
+                return Err("Recorded route has an unsupported gap; record again.".into());
+            }
         }
         Ok(Self {
             evidence: Arc::new(evidence),
@@ -235,6 +250,7 @@ fn invalidate_approach(
     *approach = None;
     s.teaching = false;
     s.teaching_instruction.clear();
+    s.return_route = Arc::new(Vec::new());
     s.approach_ready = false;
     s.approach_start = None;
     s.approach_remaining_s = 0;
@@ -430,6 +446,7 @@ fn run(rx: mpsc::Receiver<Command>, tx: mpsc::SyncSender<Snapshot>, controls: Ar
     let mut device: Option<Device> = None;
     let mut attempt: Option<Attempt> = None;
     let mut trainer: Option<Teaching> = None;
+    let mut finish_teaching = false;
     let mut approach: Option<Approach> = None;
     let mut s = Snapshot::default();
     let mut reference = [0.; 3];
@@ -472,7 +489,11 @@ fn run(rx: mpsc::Receiver<Command>, tx: mpsc::SyncSender<Snapshot>, controls: Ar
                 invalidate_approach(&mut trainer, &mut approach, &mut s);
             }
             if matches!(&command, Command::Stop | Command::Quit) {
+                if trainer.is_some() {
+                    s.route_status = "Route recording cancelled by operator.".into();
+                }
                 trainer = None;
+                finish_teaching = false;
                 s.teaching = false;
                 s.teaching_instruction.clear();
             }
@@ -587,19 +608,26 @@ fn run(rx: mpsc::Receiver<Command>, tx: mpsc::SyncSender<Snapshot>, controls: Ar
                         if ui_time.elapsed() > Duration::from_millis(250) {
                             return Err("Live UI required for teaching.");
                         }
-                        let zero = s.sweep.zero_model_m.ok_or("Record a working zero first.")?;
-                        Teaching::new(s.position, zero)
+                        Arc::make_mut(&mut s.sweep).choose_zero(s.position)?;
+                        Teaching::new(s.position)
                     })();
                     match result {
                         Ok(t) => {
-                            let _ = Arc::make_mut(&mut s.sweep).review_path(t.start);
+                            finish_teaching = false;
                             s.teaching = true;
                             s.teaching_instruction = t.stage.instruction().into();
                             s.status = s.teaching_instruction.clone();
+                            s.route_status = s.status.clone();
                             trainer = Some(t);
                         }
-                        Err(e) => s.status = e.into(),
+                        Err(e) => {
+                            s.status = e.into();
+                            s.route_status = s.status.clone();
+                        }
                     }
+                }
+                Command::FinishTeaching if s.teaching && !s.active => {
+                    finish_teaching = true;
                 }
                 Command::Capture(index) if s.reference && !s.active && index < 6 => {
                     if let Some(p) = stable(&history) {
@@ -632,6 +660,7 @@ fn run(rx: mpsc::Receiver<Command>, tx: mpsc::SyncSender<Snapshot>, controls: Ar
                             "workspace_verified_for_force":false,
                             "manual_approach_evidence":approach.as_ref().map(|a|a.evidence.as_ref()),
                             "live_manual_route_confirmed":approach.is_some(),
+                            "route_status":s.route_status,
                             "sample_cell_m":crate::sweep::CELL_M
                         });
                         std::fs::write(
@@ -694,6 +723,20 @@ fn run(rx: mpsc::Receiver<Command>, tx: mpsc::SyncSender<Snapshot>, controls: Ar
                             },
                             effect_radius_m,
                         );
+                        let planner = if s.sweep_mode && test == Test::Zero {
+                            Move::from_route(
+                                approach
+                                    .as_ref()
+                                    .unwrap()
+                                    .evidence
+                                    .return_route_model_m
+                                    .clone(),
+                                settings,
+                            )
+                            .map_err(str::to_owned)?
+                        } else {
+                            Move::new(s.position, goal, settings)
+                        };
                         d.guard
                             .set_limits(haptics_device::ForceLimits {
                                 force_n: settings.force_n,
@@ -703,7 +746,7 @@ fn run(rx: mpsc::Receiver<Command>, tx: mpsc::SyncSender<Snapshot>, controls: Ar
                             .map_err(str::to_owned)?;
                         d.enable_feedback().map_err(|e| e.to_string())?;
                         Ok(Attempt {
-                            planner: Move::new(s.position, goal, settings),
+                            planner,
                             effect,
                             volume,
                             settings,
@@ -808,8 +851,21 @@ fn run(rx: mpsc::Receiver<Command>, tx: mpsc::SyncSender<Snapshot>, controls: Ar
                         {
                             Err("Teaching stopped by UI timeout or pen button.")
                         } else {
-                            t.sample(s.position, dt.as_secs_f64(), s.stable)
+                            t.sample(s.position, dt.as_secs_f64())
                         };
+                        let result = result.map(|stage| {
+                            if finish_teaching {
+                                finish_teaching = false;
+                                match t.finish(s.stable) {
+                                    Ok(()) => return Stage::Complete,
+                                    Err(e) => {
+                                        s.status = e.into();
+                                        s.route_status = s.status.clone();
+                                    }
+                                }
+                            }
+                            stage
+                        });
                         match result {
                             Ok(Stage::Complete) => {
                                 let evidence =
@@ -822,19 +878,17 @@ fn run(rx: mpsc::Receiver<Command>, tx: mpsc::SyncSender<Snapshot>, controls: Ar
                                         if let Some(e) = s.sweep.extrema() {
                                             s.measured = e;
                                         }
-                                        Arc::make_mut(&mut s.sweep).path_review =
-                                            Some(crate::sweep::PathReview {
-                                                start_model_m: a.evidence.start_model_m,
-                                                zero_model_m: a.evidence.zero_model_m,
-                                                sample_count: a.cloud.points().len(),
-                                                support_radius_m: a.cloud.policy().support_radius_m,
-                                                evidence_margin_m: a.cloud.policy().margin_m,
-                                                first_gap_fraction: None,
-                                            });
+                                        Arc::make_mut(&mut s.sweep).path_review = None;
+                                        s.return_route =
+                                            Arc::new(a.evidence.return_route_model_m.clone());
                                         s.status = Stage::Complete.instruction().into();
+                                        s.route_status = s.status.clone();
                                         approach = Some(a);
                                     }
-                                    Err(e) => s.status = e,
+                                    Err(e) => {
+                                        s.status = e;
+                                        s.route_status = s.status.clone();
+                                    }
                                 }
                                 trainer = None;
                                 s.teaching = false;
@@ -842,13 +896,15 @@ fn run(rx: mpsc::Receiver<Command>, tx: mpsc::SyncSender<Snapshot>, controls: Ar
                             }
                             Ok(stage) => {
                                 s.teaching_instruction = stage.instruction().into();
-                                s.status = s.teaching_instruction.clone();
+                                // Keep a premature Finish explanation visible until the next action.
                             }
                             Err(e) => {
                                 trainer = None;
                                 s.teaching = false;
                                 s.teaching_instruction.clear();
                                 s.status = e.into();
+                                s.route_status = s.status.clone();
+                                finish_teaching = false;
                             }
                         }
                     }
@@ -1046,26 +1102,36 @@ mod tests {
         }
     }
     #[test]
+    fn curved_route_proof_does_not_require_or_accept_a_straight_shortcut() {
+        let mut t = Teaching::new([0.; 3]).unwrap();
+        for i in 1..=100 {
+            t.sample([i as f64 * 0.0002, 0., 0.], 0.01).unwrap();
+        }
+        for i in 1..=100 {
+            t.sample([0.02, i as f64 * 0.0002, 0.], 0.01).unwrap();
+        }
+        t.finish(true).unwrap();
+        let e = t.evidence().unwrap();
+        let a = Approach::from_teaching(e.clone(), &Sweep::default(), Instant::now()).unwrap();
+        assert_ne!(
+            a.cloud
+                .review_segment(e.start_model_m, e.zero_model_m)
+                .unwrap(),
+            haptics_workspace::SegmentReview::Supported
+        );
+        let mut shortcut = e;
+        shortcut.return_route_model_m = vec![shortcut.start_model_m, shortcut.zero_model_m];
+        assert!(Approach::from_teaching(shortcut, &Sweep::default(), Instant::now()).is_err());
+    }
+    #[test]
     fn live_trace_authority_expires_and_rejects_changed_start_zero_and_force() {
         let start = [0.; 3];
         let zero = [0., 0.02, 0.];
-        let mut trainer = Teaching::new(start, zero).unwrap();
-        for i in 1..=100 {
-            trainer
-                .sample([0., i as f64 * 0.0002, 0.], 0.01, false)
-                .unwrap();
-        }
-        for _ in 0..40 {
-            trainer.sample(zero, 0.01, true).unwrap();
-        }
+        let mut trainer = Teaching::new(zero).unwrap();
         for i in (0..100).rev() {
-            trainer
-                .sample([0., i as f64 * 0.0002, 0.], 0.01, false)
-                .unwrap();
+            trainer.sample([0., i as f64 * 0.0002, 0.], 0.01).unwrap();
         }
-        for _ in 0..40 {
-            trainer.sample(start, 0.01, true).unwrap();
-        }
+        trainer.finish(true).unwrap();
         let now = Instant::now();
         let proof =
             Approach::from_teaching(trainer.evidence().unwrap(), &Sweep::default(), now).unwrap();

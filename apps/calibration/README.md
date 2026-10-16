@@ -198,23 +198,39 @@ model-space proximity parameters, not physical clearance or force limits. A
 supported review alone does not authorize powered movement.
 
 
-## Teach a live pilot route
+## Record a freehand return route
 
-With motors off, move to a still starting pose 5–500 model mm from zero and select
-**Teach approach: to zero and back**. Follow the gold line to zero slowly, hold
-still, return along the same line, and hold still again. On-screen instructions
-show the current stage. Stay within 2 model mm of the line and below 60 model
-mm/s. Delayed input, a UI timeout, the pen button or Stop cancels teaching.
+Use the prominent **Record a return route** card above the experiment controls
+in the right panel. This replaces the old straight out-and-back teaching method.
 
-A completed trace must support the entire straight segment. Its live confirmation
-expires after five minutes and is discarded on reconnect or calibration changes.
-A saved trace cannot restore it. During this window, a fresh held zero attempt
-requires the pen within 0.75 model mm of the taught start; held objects require
-a still pose inside the sample-supported region. Pilot commands are capped at
-0.1 model N, with object radius at most 20 model mm. Leaving sample support or
-expiry during an attempt stops output, alongside the existing interlocks.
+1. With motors off, place the pen at a comfortable interior working zero and hold
+   still. Click **Record zero & start route**. This records the current pose as
+   the new zero, so there is no small target to find by hand.
+2. Move freely along a comfortable path to the pose from which you want to start
+   the powered return. Curves are allowed; do not follow the optional straight
+   path-review line. Keep speed below 60 model mm/s.
+3. Hold still and click **Finish route at this pose**. Finish must be 5–500 model
+   mm from zero. A premature Finish explains the issue and leaves recording active.
+4. **Export route / diagnostic evidence** preserves the result and latest route
+   status. Invalid input, jumps over 3 mm, sample gaps over 100 ms, UI loss, Stop,
+   pen button or 180 seconds of recording cancel the trace. This 100 ms allowance
+   applies only to motor-off recording; powered sample intervals remain <=25 ms.
+5. Select **Slow move to (0, 0, 0)** and use a fresh hold when ready for an attended
+   pilot. Stay at the finishing pose. Output follows the gold recorded polyline
+   backwards to zero, with the same bounded speed, lead, stall and release checks.
 
-The trace and support policy are exported with attempt metadata. This workflow
-has been tested offline only: hand-guided motion does not verify physical force,
-thermal limits, or overload release. Run controlled physical checks with the
-owner present before interpreting the demos as validated device behaviour.
+Every route segment must be supported by recorded observations. A direct chord
+through the workspace is never substituted for the recorded bends. Position
+projection stays local along the route so crossings cannot skip distant segments.
+The recorded start must be within 0.75 model mm when a zero attempt begins.
+
+Live confirmation expires after five minutes and is discarded on reconnect or
+calibration changes. Saved JSON cannot restore it. All swept-map pilots retain
+the 0.1 model N cap and 20 model mm maximum object radius. Leaving sample support
+or expiry during an attempt stops output along with the existing interlocks.
+
+Exports identify `freehand_reverse_v1`, original time-ordered observations and
+`return_route_model_m` in execution order. Failed recordings export `route_status`
+without live authorization. The route controls do not open a motor session.
+This revised workflow has been tested offline only; tracing does not verify
+physical force, thermal limits or overload release.
