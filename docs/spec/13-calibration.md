@@ -211,3 +211,32 @@ A changed extremum invalidates an earlier path review. Extrema remain display
 and mapping evidence only: never insert enclosing-box corners into path support.
 The point-storage cap remains unchanged; additional observed extrema do not imply
 that unretained points are available for continuous-path support.
+
+## Freehand reverse route (supersedes straight out-and-back teaching)
+
+Owner requests a different teaching method after the straight-line workflow
+proved impractical. With motors off, one explicit action records the current
+stable interior pose as working zero and starts a freehand trace. The operator
+moves along a comfortable route to the desired starting pose, holds still and
+selects Finish. There is no prescribed straight line, return leg or automatic
+endpoint dwell to chase. Finishing requires a stable pose 5–500 model mm from
+zero. Every live sample remains validated; retain points at 0.5 mm spacing plus
+both endpoints. Allow input-only sample gaps up to 100 ms, but no positional
+jump above 3 mm or model speed above 60 mm/s. Abort on longer delays, invalid
+samples, UI loss, pen button, Stop or duration above 180 s. Powered-loop timing
+limits remain 25 ms. Export method/version and the ordered reversed route, plus
+the original timestamped observations. Export the latest route status even when
+recording failed, so failures can be diagnosed without guessing from path review.
+
+Validate every adjacent route segment against sample support, never the direct
+start-to-zero shortcut. The powered planner follows cumulative distance along
+this polyline. Limit local position projection to ±3 mm around prior progress to
+avoid jumping across nearby loops. Advance target at selected speed and at most
+2 mm ahead of projected pen progress. Preserve 3 mm route-deviation stop, 5 s
+progress stall, 180 s total timeout and final 0.75 mm/0.5 s settle check. Require
+target progress to reach the final route segment before settling at zero, so a
+loop passing near zero cannot finish early. Existing force, hold, expiry, sample
+support and transport guards remain. Saved routes never restore live authority.
+Show the recorded return route and put the two route actions prominently above
+the held-experiment controls. Existing straight-path review remains optional
+geometry analysis, distinct from the freehand recording workflow.
