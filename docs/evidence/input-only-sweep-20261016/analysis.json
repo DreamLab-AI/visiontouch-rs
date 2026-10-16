@@ -1,0 +1,51 @@
+{
+  "sample_count": 31271,
+  "elapsed_s": 74.10678207400001,
+  "input_sha256": "f32cca2bbbca8c9886266b18f6f11b6920971ce8a1e079d2157afaf87bd3f619",
+  "owner_pose_label": "Pen left on desk at bottom dead centre (ish), per owner after stop",
+  "reference_method": "median of final 2 seconds; provisional resting pose, not mechanical zero",
+  "reference_model_m": [
+    -0.0011682895,
+    0.0009239395,
+    0.0071950071
+  ],
+  "tail_samples": 855,
+  "tail_span_mm": [
+    0.00023449999999995176,
+    0.0015189999999999561,
+    0.02948780000000019
+  ],
+  "observed_span_mm": [
+    393.29091950000003,
+    255.3140738,
+    207.99209929999998
+  ],
+  "encoder_ranges": [
+    [
+      -8144,
+      8633
+    ],
+    [
+      -7975,
+      1773
+    ],
+    [
+      -12064,
+      -25
+    ],
+    [
+      -603,
+      543
+    ],
+    [
+      -140,
+      200
+    ],
+    [
+      -385,
+      222
+    ]
+  ],
+  "max_interval_us": 2873.351,
+  "intervals_over_25ms": 0
+}
