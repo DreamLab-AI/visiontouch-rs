@@ -1,6 +1,18 @@
 # Session handoff — 2026-10-16
 
-## Latest continuation — public crate documentation audit
+## Latest continuation — acceptance audit
+
+The documentation turn was progress. The requirement-by-requirement audit is in
+`docs/calibration-acceptance.md`. Current checks pass: 60 Rust unit tests, three
+doctests, five viewer tests, formatting and six audio tests. The full goal remains
+unproven because delivered force, resistance and physical release have not been
+validated; the earlier weak-contact report remains unresolved. Exact legacy demo
+pack recovery and unit compatibility remain partial research results, not claims
+of completed historical coverage. Hardware remains off. The next end-to-end
+acceptance step requires an attended physical session; no new live action is
+started by automatic goal continuation.
+
+## Earlier continuation — public crate documentation audit
 
 The extrema fix was progress and is pushed. This offline continuation audited
 public Rust documentation with `missing_docs`, identifying and documenting 67
