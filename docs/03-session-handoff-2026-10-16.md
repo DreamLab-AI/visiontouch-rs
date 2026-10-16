@@ -1,6 +1,32 @@
 # Session handoff — 2026-10-16
 
-## Latest continuation — sweep evidence and offline reconstruction
+## Latest continuation — live route teaching, offline verified
+
+This section supersedes the initial sweep force-lock notes below. Hardware remains
+powered off; no device was opened during this continuation. Owner authorized
+completion, commits and push to main.
+
+- Native sweep calibration now offers motor-off out-and-back approach teaching.
+  Continuous input, slow speed, a narrow straight corridor and two still dwells
+  are required. Delays, Stop, pen button, UI loss and calibration changes cancel it.
+- Only the worker's fresh completed trace can authorize swept-map pilot attempts;
+  neither exported JSON nor the geometry review can restore authorization.
+  Confirmation expires after five minutes. Zero moves require the taught start;
+  all held effects require sample support and a 0.1 model N ceiling. Active
+  attempts stop on expiry or leaving support, subject to documented I/O latency.
+- Trace/policy evidence accompanies exports and attempt metadata. Object radius
+  is limited to 20 model mm in this workflow. All seven original demos remain.
+- Verified: 58 workspace Rust unit tests and three doc tests; Clippy all targets;
+  native build and both offline graphics smoke modes. Neither graphics mode
+  creates a device worker. Teaching/expiry rejection tests use synthetic data.
+- Next attended work: capture a fresh bottom reference, sweep, choose zero,
+  teach a comfortable short route, then assess low-force response. Physical
+  force calibration, resistance/overload release, thermal behaviour and precise
+  arm geometry remain unresolved; tracing does not validate those quantities.
+- Offline launch: `tools/run-calibration --demo`; recorded 3D reconstruction:
+  `tools/run-workspace-viewer`. See app READMEs for controls and evidence limits.
+
+## Earlier continuation — sweep evidence and offline reconstruction
 
 This section supersedes earlier runtime/force-session notes below. The owner
 powered the unit off after an explicitly requested input-only sweep recording.

@@ -187,13 +187,15 @@ pub fn draw(
     }
     draw_sphere_wires(Vec3::ZERO, 0.12, None, Color::from_rgba(222, 234, 242, 255));
     let centre_model = volume.zero().unwrap_or([0.; 3]);
-    let r = volume.radius().clamp(0.0002, 0.1);
+    let r = volume
+        .radius()
+        .clamp(0.0002, if s.sweep_mode { 0.02 } else { 0.1 });
     let radius = vec3(
         (point(volume, add(centre_model, [r, 0., 0.]))).x.abs(),
         point(volume, add(centre_model, [0., r, 0.])).y.abs(),
         point(volume, add(centre_model, [0., 0., r])).z.abs(),
     );
-    if !s.sweep_mode
+    if (!s.sweep_mode || s.approach_ready)
         && let Test::Object(kind) = test
     {
         match kind {

@@ -3,6 +3,7 @@
 //! before persistence. Snapshots are lossy and bounded so graphics cannot block I/O.
 use crate::model::*;
 use crate::sweep::Sweep;
+use crate::teaching::{self, Stage, Teaching};
 use haptics_device::{Device, Wrench};
 use haptics_effects::{Effect, Frame, Kind};
 use serde::{Deserialize, Serialize};
@@ -38,6 +39,7 @@ pub enum Command {
     Sweep(bool),
     SweepZero,
     ReviewSweepPath,
+    TeachApproach,
     SaveCalibration(Volume),
     Start(Volume, Settings, Test),
     Stop,
@@ -58,6 +60,12 @@ pub struct Snapshot {
     pub sweep: Arc<Sweep>,
     pub sweep_mode: bool,
     pub sweeping: bool,
+    pub teaching: bool,
+    pub teaching_instruction: String,
+    pub approach_ready: bool,
+    pub approach_start: Option<V>,
+    pub approach_remaining_s: u64,
+    pub current_supported: bool,
     pub position: V,
     pub velocity: V,
     pub counts: [i16; 6],
@@ -83,6 +91,12 @@ impl Default for Snapshot {
             sweep: Arc::new(Sweep::default()),
             sweep_mode: false,
             sweeping: false,
+            teaching: false,
+            teaching_instruction: String::new(),
+            approach_ready: false,
+            approach_start: None,
+            approach_remaining_s: 0,
+            current_supported: false,
             position: [0.; 3],
             velocity: [0.; 3],
             counts: [0; 6],
@@ -154,6 +168,79 @@ struct Row {
     popped: bool,
     deformation: f64,
 }
+/// Exists only after a complete live motor-off teaching trace. Never deserialized.
+struct Approach {
+    evidence: Arc<teaching::Evidence>,
+    cloud: Arc<haptics_workspace::EvidenceCloud>,
+    confirmed: Instant,
+}
+impl Approach {
+    fn from_teaching(
+        evidence: teaching::Evidence,
+        sweep: &Sweep,
+        now: Instant,
+    ) -> Result<Self, String> {
+        let mut points = sweep.points_model_m.clone();
+        points.extend(evidence.observations.iter().map(|r| [r[1], r[2], r[3]]));
+        points.extend([evidence.start_model_m, evidence.zero_model_m]);
+        let cloud = haptics_workspace::EvidenceCloud::new(points, Default::default())
+            .map_err(|e| e.to_string())?;
+        if cloud
+            .review_segment(evidence.start_model_m, evidence.zero_model_m)
+            .map_err(|e| e.to_string())?
+            != haptics_workspace::SegmentReview::Supported
+        {
+            return Err(
+                "Taught route still has unsupported gaps; repeat the trace more closely.".into(),
+            );
+        }
+        Ok(Self {
+            evidence: Arc::new(evidence),
+            cloud: Arc::new(cloud),
+            confirmed: now,
+        })
+    }
+    fn validate_start(
+        &self,
+        now: Instant,
+        p: V,
+        zero: V,
+        test: Test,
+        force: f64,
+    ) -> Result<(), &'static str> {
+        if now.saturating_duration_since(self.confirmed) >= teaching::MAX_AGE {
+            return Err("Manual route confirmation expired; teach it again.");
+        }
+        if !force.is_finite() || force <= 0. || force > teaching::PILOT_FORCE_N {
+            return Err("Swept-map pilot attempts are capped at 0.1 model N.");
+        }
+        if norm(sub(zero, self.evidence.zero_model_m)) > 1e-9 {
+            return Err("Working zero changed; teach the route again.");
+        }
+        if !self.cloud.contains(p) {
+            return Err("Return to the sample-supported region before starting.");
+        }
+        if test == Test::Zero && norm(sub(p, self.evidence.start_model_m)) > 0.00075 {
+            return Err("Return within 0.75 model mm of the taught starting pose.");
+        }
+        Ok(())
+    }
+}
+fn invalidate_approach(
+    trainer: &mut Option<Teaching>,
+    approach: &mut Option<Approach>,
+    s: &mut Snapshot,
+) {
+    *trainer = None;
+    *approach = None;
+    s.teaching = false;
+    s.teaching_instruction.clear();
+    s.approach_ready = false;
+    s.approach_start = None;
+    s.approach_remaining_s = 0;
+    s.current_supported = false;
+}
+
 struct Attempt {
     volume: Volume,
     settings: Settings,
@@ -165,6 +252,10 @@ struct Attempt {
     rows: Vec<Row>,
     reference: V,
     reference_counts: [i16; 6],
+    support: Option<Arc<haptics_workspace::EvidenceCloud>>,
+    approach_evidence: Option<Arc<teaching::Evidence>>,
+    authorization_expires: Option<Instant>,
+    effect_radius_m: f64,
 }
 impl Attempt {
     fn save(self, reason: &str) -> std::io::Result<String> {
@@ -176,6 +267,7 @@ impl Attempt {
         let prefix = format!("{DIRECTORY}/attempt-{id}");
         let metadata = serde_json::json!({"schema":1,"test":self.test,"settings":self.settings,
             "volume":self.volume,"unit_derating":haptics_device::UNIT_DERATING,"reference_model_m":self.reference,"reference_counts":self.reference_counts,
+            "approach_evidence":self.approach_evidence.as_deref(),"effect_radius_m":self.effect_radius_m,
             "result":reason,"samples":self.rows.len(),"started_unix_ns":self.started_unix_ns,"force_units":"model newtons, not measured force"});
         std::fs::write(
             format!("{prefix}.json"),
@@ -247,10 +339,8 @@ impl Attempt {
 /// Every attempt passes this check before the device can be armed. Sweeps are
 /// observational evidence and cannot be substituted for an approved force map.
 fn validate_attempt_mapping(s: &Snapshot, volume: &Volume) -> Result<(), &'static str> {
-    if s.sweep_mode || s.sweeping {
-        return Err(
-            "Sweep acquisition is input-only; validate the usable region and approach path before powered tests.",
-        );
+    if s.sweeping || s.teaching || (s.sweep_mode && !s.approach_ready) {
+        return Err("Finish motor-off approach teaching before a swept-map pilot attempt.");
     }
     if !s.reference || volume.measured != s.measured {
         return Err("Capture a fresh bottom reference and all six bounds.");
@@ -339,6 +429,8 @@ fn stable(history: &VecDeque<(Instant, V)>) -> Option<V> {
 fn run(rx: mpsc::Receiver<Command>, tx: mpsc::SyncSender<Snapshot>, controls: Arc<Controls>) {
     let mut device: Option<Device> = None;
     let mut attempt: Option<Attempt> = None;
+    let mut trainer: Option<Teaching> = None;
+    let mut approach: Option<Approach> = None;
     let mut s = Snapshot::default();
     let mut reference = [0.; 3];
     let mut reference_counts = [0; 6];
@@ -355,7 +447,35 @@ fn run(rx: mpsc::Receiver<Command>, tx: mpsc::SyncSender<Snapshot>, controls: Ar
             last_pulse = pulse;
             ui_time = now;
         }
+        if approach
+            .as_ref()
+            .is_some_and(|a| now.saturating_duration_since(a.confirmed) >= teaching::MAX_AGE)
+        {
+            invalidate_approach(&mut trainer, &mut approach, &mut s);
+            s.status =
+                "Manual route expired; teach it again before another swept-map attempt.".into();
+        }
         for command in rx.try_iter() {
+            if !s.active
+                && matches!(
+                    &command,
+                    Command::Connect
+                        | Command::Disconnect
+                        | Command::Bottom
+                        | Command::Capture(_)
+                        | Command::Sweep(_)
+                        | Command::SweepZero
+                        | Command::ReviewSweepPath
+                        | Command::TeachApproach
+                )
+            {
+                invalidate_approach(&mut trainer, &mut approach, &mut s);
+            }
+            if matches!(&command, Command::Stop | Command::Quit) {
+                trainer = None;
+                s.teaching = false;
+                s.teaching_instruction.clear();
+            }
             match command {
                 Command::Quit => {
                     quitting = true;
@@ -368,6 +488,7 @@ fn run(rx: mpsc::Receiver<Command>, tx: mpsc::SyncSender<Snapshot>, controls: Ar
                     "Stopped by operator; output off.",
                 ),
                 Command::Disconnect => {
+                    invalidate_approach(&mut trainer, &mut approach, &mut s);
                     stop(
                         &mut device,
                         &mut attempt,
@@ -453,6 +574,33 @@ fn run(rx: mpsc::Receiver<Command>, tx: mpsc::SyncSender<Snapshot>, controls: Ar
                         None => "Hold still for 0.3 seconds to review this starting pose.".into(),
                     };
                 }
+                Command::TeachApproach
+                    if s.connected && s.reference && !s.active && !s.sweeping && s.sweep_mode =>
+                {
+                    let result = (|| -> Result<Teaching, &'static str> {
+                        if stable(&history).is_none() {
+                            return Err("Hold still before starting motor-off teaching.");
+                        }
+                        if device.as_ref().is_some_and(|d| d.state.button_pressed) {
+                            return Err("Release the pen button before teaching; it acts as Stop.");
+                        }
+                        if ui_time.elapsed() > Duration::from_millis(250) {
+                            return Err("Live UI required for teaching.");
+                        }
+                        let zero = s.sweep.zero_model_m.ok_or("Record a working zero first.")?;
+                        Teaching::new(s.position, zero)
+                    })();
+                    match result {
+                        Ok(t) => {
+                            let _ = Arc::make_mut(&mut s.sweep).review_path(t.start);
+                            s.teaching = true;
+                            s.teaching_instruction = t.stage.instruction().into();
+                            s.status = s.teaching_instruction.clone();
+                            trainer = Some(t);
+                        }
+                        Err(e) => s.status = e.into(),
+                    }
+                }
                 Command::Capture(index) if s.reference && !s.active && index < 6 => {
                     if let Some(p) = stable(&history) {
                         s.measured[index] = Some(p[index / 2] - reference[index / 2]);
@@ -482,6 +630,8 @@ fn run(rx: mpsc::Receiver<Command>, tx: mpsc::SyncSender<Snapshot>, controls: Ar
                             "restores_live_calibration":false,
                             "sweep":s.sweep.as_ref(), "sweep_mode":s.sweep_mode,
                             "workspace_verified_for_force":false,
+                            "manual_approach_evidence":approach.as_ref().map(|a|a.evidence.as_ref()),
+                            "live_manual_route_confirmed":approach.is_some(),
                             "sample_cell_m":crate::sweep::CELL_M
                         });
                         std::fs::write(
@@ -513,18 +663,36 @@ fn run(rx: mpsc::Receiver<Command>, tx: mpsc::SyncSender<Snapshot>, controls: Ar
                                 "Release the pen button before starting; it acts as Stop.".into()
                             );
                         }
-                        if !volume.contains(s.position, 0.) {
+                        if !volume.contains(s.position, if s.sweep_mode { 0.002 } else { 0. }) {
                             return Err(
                                 "Return the pen inside the recorded volume before starting.".into(),
                             );
                         }
                         let goal = volume.zero().unwrap();
+                        if s.sweep_mode {
+                            approach
+                                .as_ref()
+                                .ok_or("No live taught route; saved evidence cannot arm output.")?
+                                .validate_start(
+                                    Instant::now(),
+                                    s.position,
+                                    goal,
+                                    test,
+                                    settings.force_n,
+                                )
+                                .map_err(str::to_owned)?;
+                        }
+                        let effect_radius_m = if s.sweep_mode {
+                            volume.radius().min(0.02)
+                        } else {
+                            volume.radius()
+                        };
                         let effect = Effect::new(
                             match test {
                                 Test::Object(k) => k,
                                 Test::Zero => Kind::Cube,
                             },
-                            volume.radius(),
+                            effect_radius_m,
                         );
                         d.guard
                             .set_limits(haptics_device::ForceLimits {
@@ -549,6 +717,12 @@ fn run(rx: mpsc::Receiver<Command>, tx: mpsc::SyncSender<Snapshot>, controls: Ar
                             rows: Vec::with_capacity(90000),
                             reference,
                             reference_counts,
+                            support: approach.as_ref().map(|a| Arc::clone(&a.cloud)),
+                            approach_evidence: approach.as_ref().map(|a| Arc::clone(&a.evidence)),
+                            authorization_expires: approach
+                                .as_ref()
+                                .map(|a| a.confirmed + teaching::MAX_AGE),
+                            effect_radius_m,
                         })
                     })();
                     match result {
@@ -628,6 +802,64 @@ fn run(rx: mpsc::Receiver<Command>, tx: mpsc::SyncSender<Snapshot>, controls: Ar
                                     .into();
                         }
                     }
+                    if let Some(t) = trainer.as_mut() {
+                        let result = if ui_time.elapsed() > Duration::from_millis(250)
+                            || d.state.button_pressed
+                        {
+                            Err("Teaching stopped by UI timeout or pen button.")
+                        } else {
+                            t.sample(s.position, dt.as_secs_f64(), s.stable)
+                        };
+                        match result {
+                            Ok(Stage::Complete) => {
+                                let evidence =
+                                    t.evidence().expect("complete live trace has evidence");
+                                match Approach::from_teaching(evidence, &s.sweep, now) {
+                                    Ok(a) => {
+                                        for r in &a.evidence.observations {
+                                            Arc::make_mut(&mut s.sweep).record([r[1], r[2], r[3]]);
+                                        }
+                                        if let Some(e) = s.sweep.extrema() {
+                                            s.measured = e;
+                                        }
+                                        Arc::make_mut(&mut s.sweep).path_review =
+                                            Some(crate::sweep::PathReview {
+                                                start_model_m: a.evidence.start_model_m,
+                                                zero_model_m: a.evidence.zero_model_m,
+                                                sample_count: a.cloud.points().len(),
+                                                support_radius_m: a.cloud.policy().support_radius_m,
+                                                evidence_margin_m: a.cloud.policy().margin_m,
+                                                first_gap_fraction: None,
+                                            });
+                                        s.status = Stage::Complete.instruction().into();
+                                        approach = Some(a);
+                                    }
+                                    Err(e) => s.status = e,
+                                }
+                                trainer = None;
+                                s.teaching = false;
+                                s.teaching_instruction.clear();
+                            }
+                            Ok(stage) => {
+                                s.teaching_instruction = stage.instruction().into();
+                                s.status = s.teaching_instruction.clone();
+                            }
+                            Err(e) => {
+                                trainer = None;
+                                s.teaching = false;
+                                s.teaching_instruction.clear();
+                                s.status = e.into();
+                            }
+                        }
+                    }
+                    if let Some(a) = approach.as_ref() {
+                        s.approach_ready = true;
+                        s.approach_start = Some(a.evidence.start_model_m);
+                        s.approach_remaining_s = teaching::MAX_AGE
+                            .saturating_sub(now.saturating_duration_since(a.confirmed))
+                            .as_secs();
+                        s.current_supported = a.cloud.contains(s.position);
+                    }
                     s.force = d.guard.applied_force;
                     s.offsets = d.guard.applied_motor_offsets;
                     let mut reason = None;
@@ -642,6 +874,19 @@ fn run(rx: mpsc::Receiver<Command>, tx: mpsc::SyncSender<Snapshot>, controls: Ar
                             &a.volume,
                         );
                         let force = interlocks.and_then(|()| {
+                            if a.authorization_expires
+                                .is_some_and(|deadline| now >= deadline)
+                            {
+                                return Err("Manual route confirmation expired; output stopped.");
+                            }
+                            if a.support
+                                .as_ref()
+                                .is_some_and(|cloud| !cloud.contains(s.position))
+                            {
+                                return Err(
+                                    "Pen left the sample-supported region; output stopped.",
+                                );
+                            }
                             if a.start.elapsed() > Duration::from_secs(180) {
                                 return Err("Attempt timed out; output stopped.");
                             }
@@ -713,6 +958,7 @@ fn run(rx: mpsc::Receiver<Command>, tx: mpsc::SyncSender<Snapshot>, controls: Ar
                     };
                     stop(&mut device, &mut attempt, &mut s, &reason);
                     if force_fault.is_none() {
+                        invalidate_approach(&mut trainer, &mut approach, &mut s);
                         device = None;
                         s.connected = false;
                         s.reference = false;
@@ -799,6 +1045,82 @@ mod tests {
             assert!(result.is_err());
         }
     }
+    #[test]
+    fn live_trace_authority_expires_and_rejects_changed_start_zero_and_force() {
+        let start = [0.; 3];
+        let zero = [0., 0.02, 0.];
+        let mut trainer = Teaching::new(start, zero).unwrap();
+        for i in 1..=100 {
+            trainer
+                .sample([0., i as f64 * 0.0002, 0.], 0.01, false)
+                .unwrap();
+        }
+        for _ in 0..40 {
+            trainer.sample(zero, 0.01, true).unwrap();
+        }
+        for i in (0..100).rev() {
+            trainer
+                .sample([0., i as f64 * 0.0002, 0.], 0.01, false)
+                .unwrap();
+        }
+        for _ in 0..40 {
+            trainer.sample(start, 0.01, true).unwrap();
+        }
+        let now = Instant::now();
+        let proof =
+            Approach::from_teaching(trainer.evidence().unwrap(), &Sweep::default(), now).unwrap();
+        assert!(
+            proof
+                .validate_start(now, start, zero, Test::Zero, 0.1)
+                .is_ok()
+        );
+        assert!(
+            proof
+                .validate_start(now, [0., 0.01, 0.], zero, Test::Zero, 0.1)
+                .is_err()
+        );
+        assert!(
+            proof
+                .validate_start(now, [0., 0.01, 0.], zero, Test::Object(Kind::Cube), 0.1)
+                .is_ok()
+        );
+        assert!(
+            proof
+                .validate_start(now, [0.01, 0., 0.], zero, Test::Object(Kind::Cube), 0.1)
+                .is_err()
+        );
+        assert!(
+            proof
+                .validate_start(now + teaching::MAX_AGE, start, zero, Test::Zero, 0.1)
+                .is_err()
+        );
+        assert!(
+            proof
+                .validate_start(now, start, [0., 0.021, 0.], Test::Zero, 0.1)
+                .is_err()
+        );
+        for force in [0.101, f64::NAN, f64::INFINITY, -0.1, 0.] {
+            assert!(
+                proof
+                    .validate_start(now, start, zero, Test::Zero, force)
+                    .is_err()
+            );
+        }
+        let mut snapshot = Snapshot {
+            approach_ready: true,
+            teaching: true,
+            approach_start: Some(start),
+            current_supported: true,
+            ..Default::default()
+        };
+        let mut proof = Some(proof);
+        let mut trainer = Some(trainer);
+        invalidate_approach(&mut trainer, &mut proof, &mut snapshot);
+        assert!(proof.is_none() && trainer.is_none());
+        assert!(!snapshot.approach_ready && !snapshot.teaching && !snapshot.current_supported);
+        assert!(snapshot.approach_start.is_none());
+    }
+
     #[test]
     fn capture_requires_quiet_history_and_sufficient_duration() {
         let start = Instant::now();

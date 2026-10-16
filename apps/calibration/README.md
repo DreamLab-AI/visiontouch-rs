@@ -35,8 +35,9 @@ hardware.
    invalidates the old live mapping.
 
 The actual point cloud is displayed. Its enclosing box is only a display extent;
-empty space is unverified. Sweep maps cannot enable motor output until usable
-region and approach-path validation is implemented and physically checked. The
+empty space is unverified. Sweep maps require fresh live route teaching before
+any held pilot attempt (see below). Physical force and overload validation remain
+outstanding. The
 advanced six-bound workflow remains available for controlled box-based tests;
 it does not certify the corners as reachable. No scan restores motor authority.
 
@@ -192,5 +193,26 @@ intersections over the entire line. The current review uses 5 mm neighbourhoods
 minus a 2 mm evidence margin, with a tiny conservative numerical inset. Recorded
 samples and the explicitly observed still endpoints supply evidence. These are
 model-space proximity parameters, not physical clearance or force limits. A
-supported line does not authorize powered movement. Sweep output stays locked
-until the physical/temporal validation workflow is complete.
+supported review alone does not authorize powered movement.
+
+
+## Teach a live pilot route
+
+With motors off, move to a still starting pose 5–500 model mm from zero and select
+**Teach approach: to zero and back**. Follow the gold line to zero slowly, hold
+still, return along the same line, and hold still again. On-screen instructions
+show the current stage. Stay within 2 model mm of the line and below 60 model
+mm/s. Delayed input, a UI timeout, the pen button or Stop cancels teaching.
+
+A completed trace must support the entire straight segment. Its live confirmation
+expires after five minutes and is discarded on reconnect or calibration changes.
+A saved trace cannot restore it. During this window, a fresh held zero attempt
+requires the pen within 0.75 model mm of the taught start; held objects require
+a still pose inside the sample-supported region. Pilot commands are capped at
+0.1 model N, with object radius at most 20 model mm. Leaving sample support or
+expiry during an attempt stops output, alongside the existing interlocks.
+
+The trace and support policy are exported with attempt metadata. This workflow
+has been tested offline only: hand-guided motion does not verify physical force,
+thermal limits, or overload release. Run controlled physical checks with the
+owner present before interpreting the demos as validated device behaviour.

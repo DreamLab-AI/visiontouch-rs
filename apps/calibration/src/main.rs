@@ -5,6 +5,7 @@
 mod model;
 mod scene;
 mod sweep;
+mod teaching;
 mod worker;
 
 use egui_macroquad::egui::{self, Color32, RichText};
@@ -143,7 +144,16 @@ impl App {
     }
     fn ready(&self) -> bool {
         (self.demo || (self.snapshot.connected && self.received.elapsed().as_millis() < 250))
-            && !self.snapshot.sweep_mode
+            && !self.snapshot.teaching
+            && (!self.snapshot.sweep_mode
+                || (self.snapshot.approach_ready
+                    && self.snapshot.current_supported
+                    && self.settings.force_n <= teaching::PILOT_FORCE_N
+                    && (self.test != Test::Zero
+                        || self
+                            .snapshot
+                            .approach_start
+                            .is_some_and(|p| norm(sub(p, self.snapshot.position)) <= 0.00075))))
             && self.snapshot.reference
             && self.snapshot.stable
             && self.volume.validate().is_ok()
@@ -513,7 +523,7 @@ fn force_plot(ui: &mut egui::Ui, history: &VecDeque<[f64; 2]>, cap: f64) {
 }
 
 fn interface(app: &mut App, ctx: &egui::Context) -> (Rect, bool, bool) {
-    let locked = app.held || app.snapshot.active;
+    let locked = app.held || app.snapshot.active || app.snapshot.teaching;
     let mut button_hold = false;
     egui::TopBottomPanel::top("header")
         .exact_height(72.)
@@ -594,7 +604,7 @@ fn interface(app: &mut App, ctx: &egui::Context) -> (Rect, bool, bool) {
             });
             if !app.demo {
                 ui.add_enabled_ui(!locked && !app.snapshot.sweeping, |ui| {ui.checkbox(&mut app.manual_bounds,"Advanced: six-bound box calibration");});
-                if app.manual_bounds {ui.label(RichText::new("A box may contain unreachable corners. Recapture bottom to start a fresh mapping; sweep maps never arm output.").size(11.).color(AMBER));}
+                if app.manual_bounds {ui.label(RichText::new("A box may contain unreachable corners. Recapture bottom to start a fresh mapping; sweep maps require fresh manual route teaching.").size(11.).color(AMBER));}
             }
             if !app.demo && !app.manual_bounds {
                 card(ui,"02 / SWEEP THE COMFORTABLE WORKSPACE",|ui|{
@@ -623,7 +633,11 @@ fn interface(app: &mut App, ctx: &egui::Context) -> (Rect, bool, bool) {
                     }
                     if ui.add_enabled(!locked && !app.snapshot.sweeping && !app.snapshot.sweep.points_model_m.is_empty(),egui::Button::new("Export sweep evidence")).clicked(){app.send(Command::SaveCalibration(app.volume.clone()));}
                     ui.label("Coordinates use model millimetres about the chosen zero. Until then, the display centre is provisional.");
-                    ui.label(RichText::new("Powered tests remain locked for sweep maps until the usable region and approach path are validated.").color(AMBER));
+                    ui.label("Move to a still starting pose 5–500 model mm from zero. Teach a slow straight approach and return, keeping within 2 mm of the gold line. Stop or the pen button cancels.");
+                    if ui.add_enabled(!locked && app.snapshot.connected && !app.snapshot.sweeping && app.snapshot.stable && app.snapshot.sweep.zero_model_m.is_some(), egui::Button::new("Teach approach: to zero and back")).clicked(){app.send(Command::TeachApproach);}
+                    if app.snapshot.teaching {ui.label(RichText::new(&app.snapshot.teaching_instruction).strong().color(AMBER));}
+                    if app.snapshot.approach_ready {ui.label(RichText::new(format!("Live route confirmed · {} s remaining · pilot cap 0.1 model N",app.snapshot.approach_remaining_s)).color(ACCENT));}
+                    ui.label(RichText::new("Tracing records hand-guided motion; it does not measure force or prove thermal safety. Zero moves must start at the taught starting pose.").color(AMBER));
                 });
             } else {
             card(ui,"02 / ENTER YOUR WORKING COORDINATES",|ui|{
@@ -679,13 +693,15 @@ fn interface(app: &mut App, ctx: &egui::Context) -> (Rect, bool, bool) {
                 ui.label(match app.test{Test::Zero=>"Start still inside the mapped volume. Hold to move slowly to zero; apply gentle resistance to observe the bounded response and stall stop.",Test::Object(k)=>k.instructions()});
                 ui.add_enabled_ui(!locked,|ui|{
                     if matches!(app.test,Test::Zero){ui.add(egui::Slider::new(&mut app.settings.speed_mm_s,0.5..=5.).text("mm/s").fixed_decimals(1));}
-                    ui.add(egui::Slider::new(&mut app.settings.force_n,0.02..=haptics_device::MAX_FORCE_N).text("N cap").fixed_decimals(2));
+                    let cap=if app.snapshot.sweep_mode {teaching::PILOT_FORCE_N}else{haptics_device::MAX_FORCE_N};
+                    app.settings.force_n=app.settings.force_n.min(cap);
+                    ui.add(egui::Slider::new(&mut app.settings.force_n,0.02..=cap).text("N cap").fixed_decimals(2));
                 });
                 let ready=app.ready();
                 let label=if app.snapshot.active {"HOLDING · RELEASE TO STOP"}else if app.demo {"HOLD TO SIMULATE · SPACE"}else {"HOLD TO ENABLE · SPACE"};
                 let response=ui.add_enabled(ready||app.held,egui::Button::new(RichText::new(label).strong().color(Color32::from_rgb(12,34,30))).fill(if app.snapshot.active {AMBER}else{ACCENT}).sense(egui::Sense::click_and_drag()).min_size(egui::vec2(ui.available_width(),41.)));
                 button_hold=response.is_pointer_button_down_on();
-                if !ready {ui.label(RichText::new(if app.snapshot.sweep_mode {"Input-only sweep: powered tests locked pending region and path validation."} else {"Requires live samples, stable pen and all six valid captures."}).size(11.).color(AMBER));}
+                if !ready {ui.label(RichText::new(if app.snapshot.sweep_mode {"Requires fresh route teaching, a still supported pose, and return to the taught start for zero moves."} else {"Requires live samples, stable pen and all six valid captures."}).size(11.).color(AMBER));}
                 ui.label(RichText::new("Release / Escape / Stop / pen button: output off. Each hold starts a fresh attempt.").size(11.).color(MUTED));
                 ui.horizontal(|ui|{
                     if ui.add_enabled(!locked,egui::Button::new("Reset scene")).clicked(){app.reset_effect();app.notice="Scene state resets at the next held attempt; simulation preview reset.".into();}
@@ -779,6 +795,15 @@ fn interface(app: &mut App, ctx: &egui::Context) -> (Rect, bool, bool) {
         egui::FontId::monospace(10.),
         MUTED,
     );
+    if app.snapshot.teaching {
+        p.text(
+            origin + egui::vec2(0., 58.),
+            egui::Align2::LEFT_TOP,
+            &app.snapshot.teaching_instruction,
+            egui::FontId::proportional(13.),
+            AMBER,
+        );
+    }
     let legend = if app.demo {
         "Left drag: virtual pen · Shift + wheel: depth\nRight drag: orbit · wheel: zoom · Home: reset view"
     } else {
