@@ -199,3 +199,15 @@ Manual tracing is evidence of hand-guided motion, not validation of force
 magnitude, thermal safety or hard real-time control. Actual controlled resistance
 and overload tests remain necessary with the owner present. A stored or synthetic
 trace can never create live motor authorization.
+
+## Sweep extrema independent of display thinning
+
+Update all six observed extrema for every finite, in-range input passed to the
+sweep, including observations sharing a retained 2 mm cell. Keep these exact
+model-coordinate extrema alongside the bounded display cloud and export them.
+Compute spans and coordinate bounds from this accumulator in constant time;
+spatial thinning must not hide the last portion of travel within a cell.
+A changed extremum invalidates an earlier path review. Extrema remain display
+and mapping evidence only: never insert enclosing-box corners into path support.
+The point-storage cap remains unchanged; additional observed extrema do not imply
+that unretained points are available for continuous-path support.
