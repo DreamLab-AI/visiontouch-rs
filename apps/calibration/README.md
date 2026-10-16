@@ -178,3 +178,19 @@ the worker evaluates the new position and interlocks. A stop therefore has
 servo-cycle and transport latency; it is not instantaneous mechanical isolation.
 Neither a process stall nor a failed shutdown transaction establishes zero
 physical motor force. Shutdown I/O failure invalidates the connection.
+
+## Reviewing a proposed straight path
+
+After recording zero, place the pen at a proposed starting pose, hold still and
+select **Review straight path from this pose**. The gold line is the exact
+reviewed segment; red marks its first unsupported interval. Moving the pen does
+not move those reviewed endpoints. New sweep samples or a changed zero invalidate
+previous review evidence.
+
+The hardware-free `haptics-workspace` crate merges analytic sphere/segment
+intersections over the entire line. The current review uses 5 mm neighbourhoods
+minus a 2 mm evidence margin, with a tiny conservative numerical inset. Recorded
+samples and the explicitly observed still endpoints supply evidence. These are
+model-space proximity parameters, not physical clearance or force limits. A
+supported line does not authorize powered movement. Sweep output stays locked
+until the physical/temporal validation workflow is complete.

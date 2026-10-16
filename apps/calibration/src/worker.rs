@@ -37,6 +37,7 @@ pub enum Command {
     Capture(usize),
     Sweep(bool),
     SweepZero,
+    ReviewSweepPath,
     SaveCalibration(Volume),
     Start(Volume, Settings, Test),
     Stop,
@@ -439,6 +440,17 @@ fn run(rx: mpsc::Receiver<Command>, tx: mpsc::SyncSender<Snapshot>, controls: Ar
                             Err(e) => e.into(),
                         },
                         None => "Hold still for 0.3 seconds before recording zero.".into(),
+                    };
+                }
+                Command::ReviewSweepPath
+                    if s.reference && !s.active && !s.sweeping && s.sweep_mode =>
+                {
+                    s.status = match stable(&history) {
+                        Some(p) => match Arc::make_mut(&mut s.sweep).review_path(sub(p,reference)) {
+                            Ok(()) => "Path evidence reviewed; motor output remains locked for sweep maps.".into(),
+                            Err(e) => e,
+                        },
+                        None => "Hold still for 0.3 seconds to review this starting pose.".into(),
                     };
                 }
                 Command::Capture(index) if s.reference && !s.active && index < 6 => {

@@ -566,6 +566,7 @@ dependencies = [
  "egui-macroquad",
  "haptics-device",
  "haptics-effects",
+ "haptics-workspace",
  "macroquad",
  "serde",
  "serde_json",
@@ -587,6 +588,10 @@ dependencies = [
 
 [[package]]
 name = "haptics-hal"
+version = "0.1.0"
+
+[[package]]
+name = "haptics-workspace"
 version = "0.1.0"
 
 [[package]]

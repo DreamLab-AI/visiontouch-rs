@@ -8,6 +8,11 @@ The recording stopped cleanly: 31,271 packets in 74.109 s; no force session.
 The final resting pose is only approximately bottom-centre on the desk. Evidence
 and measured stability are in `docs/evidence/input-only-sweep-20261016/`.
 
+- `crates/workspace` now provides analytic whole-segment sample-support review,
+  with native gold-path/red-gap display and exported review evidence. The archived
+  sweep's first-to-last straight segment has an unsupported interval around
+  1.328%–70.609%; this is missing evidence, not an inferred obstacle. Geometry
+  review alone does not enable sweep motor output.
 - Calibration Studio now defaults to motor-off sweep acquisition, observed-cloud
   display, manually chosen zero and evidence export. Swept maps do not grant
   force authority. Advanced six-bound box calibration remains available but does

@@ -10,8 +10,19 @@ pub const MAX_POINTS: usize = 20_000;
 pub struct Sweep {
     pub points_model_m: Vec<V>,
     pub zero_model_m: Option<V>,
+    pub path_review: Option<PathReview>,
     #[serde(skip)]
     cells: HashSet<[i32; 3]>,
+}
+/// Review evidence only. This does not grant output authority or physical safety.
+#[derive(Clone, Debug, Serialize)]
+pub struct PathReview {
+    pub start_model_m: V,
+    pub zero_model_m: V,
+    pub sample_count: usize,
+    pub support_radius_m: f64,
+    pub evidence_margin_m: f64,
+    pub first_gap_fraction: Option<[f64; 2]>,
 }
 impl Sweep {
     /// Retain one measured point per 2 mm cell; never manufacture interior points.
@@ -24,6 +35,7 @@ impl Sweep {
         let cell = p.map(|x| (x / CELL_M).floor() as i32);
         if self.cells.insert(cell) {
             self.points_model_m.push(p);
+            self.path_review = None;
             true
         } else {
             false
@@ -68,7 +80,37 @@ impl Sweep {
         {
             return Err("Choose a still pose at least 2 model mm inside every observed extremity.");
         }
+        self.record(p);
         self.zero_model_m = Some(p);
+        self.path_review = None;
+        Ok(())
+    }
+    /// Review a still current pose against the manually observed zero. Never arm.
+    pub fn review_path(&mut self, start: V) -> Result<(), String> {
+        self.path_review = None;
+        let zero = self.zero_model_m.ok_or("Record a working zero first.")?;
+        let policy = haptics_workspace::Policy::default();
+        let mut observations = self.points_model_m.clone();
+        // Both endpoints were explicitly observed while still, even if no sweep
+        // cell was retained there (for example after reaching the sample cap).
+        observations.extend([start, zero]);
+        let cloud = haptics_workspace::EvidenceCloud::new(observations, policy)
+            .map_err(|e| e.to_string())?;
+        let gap = match cloud
+            .review_segment(start, zero)
+            .map_err(|e| e.to_string())?
+        {
+            haptics_workspace::SegmentReview::Supported => None,
+            haptics_workspace::SegmentReview::Gap { from, to } => Some([from, to]),
+        };
+        self.path_review = Some(PathReview {
+            start_model_m: start,
+            zero_model_m: zero,
+            sample_count: cloud.points().len(),
+            support_radius_m: policy.support_radius_m,
+            evidence_margin_m: policy.margin_m,
+            first_gap_fraction: gap,
+        });
         Ok(())
     }
     pub fn dimensions_mm(&self) -> V {
@@ -106,6 +148,28 @@ mod tests {
         assert!(s.choose_zero([0.; 3]).is_ok());
         assert!(s.choose_zero([0.019, 0., 0.]).is_err());
         assert_eq!(s.display_bounds(), Some([[-20., 20.]; 3]));
+    }
+    #[test]
+    fn changing_evidence_or_zero_invalidates_path_review() {
+        let mut s = Sweep::default();
+        for axis in 0..3 {
+            for sign in [-1., 1.] {
+                let mut p = [0.; 3];
+                p[axis] = sign * 0.02;
+                s.record(p);
+            }
+        }
+        s.choose_zero([0.; 3]).unwrap();
+        s.review_path([-0.02, 0., 0.]).unwrap();
+        assert!(s.path_review.as_ref().unwrap().first_gap_fraction.is_some());
+        assert!(s.record([-0.01, 0., 0.]));
+        assert!(s.path_review.is_none());
+        s.review_path([0.; 3]).unwrap();
+        assert!(s.path_review.as_ref().unwrap().first_gap_fraction.is_none());
+        s.choose_zero([0.001, 0., 0.]).unwrap();
+        assert!(s.path_review.is_none());
+        assert!(s.review_path([f64::NAN; 3]).is_err());
+        assert!(s.path_review.is_none());
     }
     #[test]
     fn storage_is_bounded_and_empty_scan_has_no_volume() {

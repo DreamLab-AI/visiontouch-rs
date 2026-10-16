@@ -615,6 +615,12 @@ fn interface(app: &mut App, ctx: &egui::Context) -> (Rect, bool, bool) {
                     ui.label("After sweeping, move manually to a comfortable central pose. Hold still, then record this as your working zero.");
                     if ui.add_enabled(!locked && !app.snapshot.sweeping && app.snapshot.stable && app.snapshot.sweep_mode,egui::Button::new("Record this pose as zero")).clicked(){app.send(Command::SweepZero);}
                     if app.snapshot.sweep.zero_model_m.is_some(){ui.label(RichText::new("[ok] Manually observed zero recorded").color(ACCENT));}
+                    if ui.add_enabled(!locked && app.snapshot.connected && !app.snapshot.sweeping && app.snapshot.stable && app.snapshot.sweep.zero_model_m.is_some(), egui::Button::new("Review straight path from this pose")).clicked(){app.send(Command::ReviewSweepPath);}
+                    if let Some(review)=&app.snapshot.sweep.path_review {
+                        let supported=review.first_gap_fraction.is_none();
+                        ui.label(RichText::new(if supported {"Path lies near observed samples"} else {"Path crosses an unsampled gap · shown red"}).color(if supported {ACCENT}else{AMBER}));
+                        ui.label(RichText::new("5 mm sample support minus 2 mm evidence margin. Proximity is not physical clearance; this review does not enable force.").size(10.).color(MUTED));
+                    }
                     if ui.add_enabled(!locked && !app.snapshot.sweeping && !app.snapshot.sweep.points_model_m.is_empty(),egui::Button::new("Export sweep evidence")).clicked(){app.send(Command::SaveCalibration(app.volume.clone()));}
                     ui.label("Coordinates use model millimetres about the chosen zero. Until then, the display centre is provisional.");
                     ui.label(RichText::new("Powered tests remain locked for sweep maps until the usable region and approach path are validated.").color(AMBER));
@@ -847,6 +853,15 @@ async fn main() {
             }
         }
         sweep.choose_zero([0., 0.06, 0.]).unwrap();
+        sweep.review_path([0., 0., 0.]).unwrap();
+        assert!(
+            sweep
+                .path_review
+                .as_ref()
+                .unwrap()
+                .first_gap_fraction
+                .is_some()
+        );
         app.volume.measured = sweep.extrema().unwrap();
         app.volume.bounds = sweep.display_bounds().unwrap();
         app.snapshot.measured = app.volume.measured;

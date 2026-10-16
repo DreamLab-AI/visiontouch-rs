@@ -326,6 +326,18 @@ pub fn draw(
             }
         }
     }
+    if let Some(review) = &s.sweep.path_review {
+        let start = point(volume, review.start_model_m);
+        let end = point(volume, review.zero_model_m);
+        draw_line_3d(start, end, Color::from_rgba(229, 194, 126, 255));
+        if let Some([from, to]) = review.first_gap_fraction {
+            draw_line_3d(
+                start.lerp(end, from as f32),
+                start.lerp(end, to as f32),
+                RED,
+            );
+        }
+    }
     for sample in &s.sweep.points_model_m {
         let p = point(volume, *sample);
         let dy = vec3(0., 0.018, 0.);
