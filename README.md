@@ -127,3 +127,20 @@ Read [docs/03-session-handoff-2026-10-16.md](docs/03-session-handoff-2026-10-16.
 ## Safety
 
 This device applies force to a human hand. Nothing in this repository should be run with a hand in the gimbal until the stack has a working deadline watchdog and force clamp, and the amplifier-enable path is understood.
+
+
+## Rust API documentation
+
+The reusable `haptics-hal`, `haptics-device`, `haptics-effects` and
+`haptics-workspace` crates document their public APIs inline, including coordinate
+units, software versus physical limits, and transport cleanup responsibilities.
+Missing public documentation emits a compiler warning.
+
+```sh
+RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps
+cargo test -p haptics-device -p haptics-effects -p haptics-workspace --doc
+```
+
+Open `target/doc/haptics_device/index.html` for the device lifecycle and links to
+its types. HAL calls perform real I/O; the effects and workspace geometry crates
+are hardware-free. Documentation examples do not connect to a device.

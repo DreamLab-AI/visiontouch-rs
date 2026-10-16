@@ -1,6 +1,19 @@
 # Session handoff — 2026-10-16
 
-## Latest continuation — exact sweep extrema
+## Latest continuation — public crate documentation audit
+
+The extrema fix was progress and is pushed. This offline continuation audited
+public Rust documentation with `missing_docs`, identifying and documenting 67
+previously uncovered API items across HAL, device, effects and workspace crates.
+Each crate now enables the missing-docs warning. Documentation distinguishes
+model units, retained observations, command telemetry, actual transport I/O,
+and cleanup responsibilities. In particular, HAL sampling marks an error but
+its caller must initiate shutdown; the device SDK does this automatically.
+Strict rustdoc generation and all three existing doctests pass. No device opened.
+Physical force response, thermal limits and overload release remain unverified;
+API documentation does not close those outstanding requirements.
+
+## Earlier continuation — exact sweep extrema
 
 The prior turn delivered and pushed live route teaching; it was progress. This
 continuation found and fixed loss of observed travel inside an already retained

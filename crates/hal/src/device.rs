@@ -122,6 +122,7 @@ fn transfer(bus: &mut impl Bus, address: bool, input: bool, data: &mut [u8]) -> 
 /// One complete packet. Counts are raw wrapping values, not calibrated positions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Sample {
+    /// Complete 16-byte packet in wire order, including counters and status bytes.
     pub raw: [u8; 16],
 }
 
@@ -149,6 +150,9 @@ pub struct DeviceReader {
 }
 
 impl DeviceReader {
+    /// Exclusively claim a ppdev character device and perform observed active setup.
+    /// Does not start a force session. On partial failure, cleanup is attempted.
+    /// Unsupported paths, claim failures and handshake timeouts return I/O errors.
     pub fn connect(path: impl AsRef<Path>) -> io::Result<Self> {
         let file = OpenOptions::new()
             .read(true)
@@ -192,6 +196,10 @@ impl DeviceReader {
         transfer(&mut self.port, true, false, &mut [address])
     }
 
+    /// Read one complete packet and validate any pending force acknowledgement.
+    /// A failed transaction marks the connection unhealthy; subsequent sampling
+    /// requires a new connection. The caller must attempt session shutdown or
+    /// close on error; this low-level read does not itself send shutdown packets.
     pub fn sample(&mut self) -> io::Result<Sample> {
         if !self.healthy {
             return Err(io::Error::other("connection failed; close and reconnect"));
@@ -285,6 +293,9 @@ impl DeviceReader {
         result
     }
 
+    /// Attempt both neutral/shutdown packets and clear local session state.
+    /// A failed cleanup marks the connection unhealthy. Success is transport-level
+    /// evidence, not a measurement of zero motor force. No session is a no-op.
     pub fn end_force_session(&mut self) -> io::Result<()> {
         let Some(sequence) = self.force_sequence else {
             return Ok(());
@@ -327,6 +338,9 @@ impl DeviceReader {
         force.and(controls).and(direction).and(release)
     }
 
+    /// Consume the reader and attempt shutdown, signal cleanup and port release.
+    /// All cleanup stages are attempted even after an earlier error; Drop retries
+    /// release if the explicit release failed.
     pub fn close(mut self) -> io::Result<()> {
         self.release()
     }

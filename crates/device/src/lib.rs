@@ -39,12 +39,17 @@
 //! decoded hardware overload signal. Independent surface-temperature observations
 //! belong in session records. Software cleanup cannot cover SIGKILL or a kernel
 //! scheduling stall; no hardware watchdog behavior is claimed.
+#![warn(missing_docs)]
 pub mod shutdown;
 use haptics_hal::device::Sample;
 use std::time::{Duration, Instant};
 
+/// Maximum request age and serviced-tick gap before the software guard returns zero.
+/// Only evaluated when the worker runs; this is not an autonomous hardware watchdog.
 pub const COMMAND_TIMEOUT: Duration = Duration::from_millis(25);
+/// Maximum pre-derating model-force magnitude in newtons, not a measured rating.
 pub const MAX_FORCE_N: f64 = 0.5;
+/// Maximum pre-derating absolute per-channel command offset from neutral.
 pub const MAX_DAC_OFFSET: i16 = 96;
 
 /// One unit-wide gain, applied exactly once by the guard to force, slew and DAC
@@ -58,9 +63,14 @@ const _: () = assert!(UNIT_DERATING > 0. && UNIT_DERATING <= 1.);
 /// Saturation release observes command demand, never measured physical load.
 #[derive(Clone, Copy, Debug)]
 pub struct ForceLimits {
+    /// Pre-derating vector magnitude ceiling in model newtons, in (0, 0.5].
     pub force_n: f64,
+    /// Pre-derating force-vector slew ceiling in model N/s, in (0, 2].
     pub slew_n_s: f64,
+    /// Pre-derating absolute per-channel DAC offset ceiling, in 1..=96.
     pub dac_counts: i16,
+    /// Optional continuous command-limit duration before a latched release.
+    /// Must be positive and at most one second; None disables this extra policy.
     pub release_after: Option<Duration>,
 }
 impl Default for ForceLimits {
@@ -92,9 +102,11 @@ impl ForceLimits {
 /// Latched software fault. This is not a sensor or decoded amplifier fault.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ForceFault {
+    /// Demand remained over the force or DAC limit for the configured duration.
     SustainedCommandLimit,
 }
 impl ForceFault {
+    /// Operator-facing description of the software trip.
     pub fn message(self) -> &'static str {
         match self {
             Self::SustainedCommandLimit => {
@@ -104,10 +116,13 @@ impl ForceFault {
     }
 }
 
-/// World-space force and torque requested at the tool, in N and N·m.
+/// Force and torque requested at the tool in the device kinematic frame, in
+/// model N and N·m. Applications must transform scene axes into this frame.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Wrench {
+    /// Cartesian force in model newtons in the device kinematic coordinate frame.
     pub force: [f64; 3],
+    /// Torque in N·m. Only the zero vector is accepted until wrist actuation is verified.
     pub torque: [f64; 3],
 }
 
@@ -116,11 +131,16 @@ pub struct Wrench {
 pub struct EncoderState {
     previous: Option<[i16; 6]>,
     continuous_counts: [i64; 6],
+    /// Latest raw signed 16-bit counters for all six measured channels.
     pub counts: [i16; 6],
+    /// Accumulated count deltas since first sample or the last relative recenter.
     pub relative_counts: [i64; 6],
+    /// Latest decoded active-low pen button state.
     pub button_pressed: bool,
 }
 impl EncoderState {
+    /// Consume a packet and unwrap successive count deltas.
+    /// Motion between samples must be less than half the 16-bit counter range.
     pub fn update(&mut self, sample: Sample) {
         self.counts = sample.encoder_counts();
         if let Some(previous) = self.previous {
@@ -136,6 +156,7 @@ impl EncoderState {
         self.previous = Some(self.counts);
         self.button_pressed = sample.stylus_button_pressed();
     }
+    /// Zero display-relative deltas without changing absolute kinematic history.
     pub fn recenter(&mut self) {
         self.relative_counts = [0; 6];
     }
@@ -144,6 +165,7 @@ impl EncoderState {
     pub fn continuous_counts(&self) -> [i64; 6] {
         self.continuous_counts
     }
+    /// Compute model position in metres from continuous absolute main-arm counters.
     pub fn position_m(&self) -> [f64; 3] {
         position_from_counts(std::array::from_fn(|i| self.continuous_counts[i] as f64))
     }
@@ -157,6 +179,8 @@ fn angles(counts: [f64; 3]) -> [f64; 3] {
     ]
 }
 
+/// Raw-counter convenience position in model metres. For moving devices use
+/// [`EncoderState::position_m`] to preserve continuity across signed counter wrap.
 pub fn position_m(counts: [i16; 6]) -> [f64; 3] {
     position_from_counts([counts[0] as f64, counts[1] as f64, counts[2] as f64])
 }
@@ -234,6 +258,7 @@ pub struct ForceGuard {
     pub fault: Option<ForceFault>,
     /// Exact bounded offsets returned on the latest tick, before transport I/O.
     pub applied_motor_offsets: [i16; 3],
+    /// Guarded model force before DAC conversion/clamping; not a force measurement.
     pub applied_force: [f64; 3],
 }
 impl ForceGuard {
@@ -248,10 +273,14 @@ impl ForceGuard {
         self.limits = limits;
         Ok(())
     }
+    /// Reset pending demand and faults, then arm this software guard.
+    /// This performs no I/O; use [`Device::enable_feedback`] for a device session.
     pub fn arm(&mut self) {
         self.disarm();
         self.armed = true;
     }
+    /// Clear demand, faults and output state while retaining configured limits.
+    /// This performs no transport shutdown; use [`Device::disable_feedback`] for hardware.
     pub fn disarm(&mut self) {
         let limits = self.limits;
         *self = Self {
@@ -259,6 +288,9 @@ impl ForceGuard {
             ..Self::default()
         };
     }
+    /// Queue a finite force request with its monotonic creation timestamp.
+    /// Non-finite input or nonzero torque disarms the guard and returns an error.
+    /// Queuing does not arm output; freshness is checked when the guard is serviced.
     pub fn request(&mut self, wrench: Wrench, time: Instant) -> Result<(), &'static str> {
         if wrench
             .force
@@ -348,12 +380,16 @@ impl ForceGuard {
 /// application stops supplying requests. Drop performs zero/shutdown cleanup.
 pub struct Device {
     reader: haptics_hal::device::DeviceReader,
+    /// Latest measured input and continuous counter history, updated by sample.
     pub state: EncoderState,
+    /// Software output policy and command telemetry. Configure limits while disarmed.
     pub guard: ForceGuard,
     feedback: bool,
     last_force_fault: Option<ForceFault>,
 }
 impl Device {
+    /// Claim and initialize the ppdev connection without enabling feedback.
+    /// Performs active transport I/O; errors propagate from the HAL.
     pub fn connect(path: impl AsRef<std::path::Path>) -> std::io::Result<Self> {
         Ok(Self {
             reader: haptics_hal::device::DeviceReader::connect(path)?,
@@ -363,6 +399,9 @@ impl Device {
             last_force_fault: None,
         })
     }
+    /// Begin the motor-session handshake and arm the guard with cleared demand.
+    /// Idempotent while feedback is already enabled. Call only after application
+    /// calibration, operator intent and other interlocks have been checked.
     pub fn enable_feedback(&mut self) -> std::io::Result<()> {
         if !self.feedback {
             self.reader.begin_force_session()?;
@@ -371,11 +410,16 @@ impl Device {
         }
         Ok(())
     }
+    /// Disarm locally and attempt the transport neutral/shutdown sequence.
+    /// An error means physical shutdown is unconfirmed; close and reconnect.
     pub fn disable_feedback(&mut self) -> std::io::Result<()> {
         self.guard.disarm();
         self.feedback = false;
         self.reader.end_force_session()
     }
+    /// Queue demand for the next serviced sample; this does not enable feedback.
+    /// Invalid demand triggers shutdown. A shutdown I/O error takes precedence
+    /// over the invalid-demand error because physical release is then unconfirmed.
     pub fn request(&mut self, wrench: Wrench, time: Instant) -> std::io::Result<()> {
         if let Err(e) = self.guard.request(wrench, time) {
             self.disable_feedback()?;
@@ -383,6 +427,10 @@ impl Device {
         }
         Ok(())
     }
+    /// Read inputs, update kinematics and service the previously queued force.
+    /// A newly read position reaches application interlocks only after that service.
+    /// On failure, attempt shutdown and return an error; inspect [`Self::take_force_fault`]
+    /// before another sample to distinguish a software release from an I/O failure.
     pub fn sample(&mut self) -> std::io::Result<Sample> {
         self.last_force_fault = None;
         let result = (|| {
@@ -414,6 +462,8 @@ impl Device {
     pub fn take_force_fault(&mut self) -> Option<ForceFault> {
         self.last_force_fault.take()
     }
+    /// Consume the connection, attempt shutdown and release the port.
+    /// Propagates cleanup errors; Drop also attempts cleanup on an early error.
     pub fn close(mut self) -> std::io::Result<()> {
         self.disable_feedback()?;
         self.reader.close()

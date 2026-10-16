@@ -7,6 +7,8 @@ extern "C" fn on_signal(_: i32) {
 unsafe extern "C" {
     fn signal(number: i32, handler: usize) -> usize;
 }
+/// Whether an installed SIGINT/SIGTERM handler has requested worker shutdown.
+/// This process-wide flag latches; polling alone performs no device I/O.
 pub fn requested() -> bool {
     STOP.load(Ordering::Relaxed)
 }

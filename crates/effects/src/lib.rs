@@ -12,27 +12,36 @@
 //! let contact = cube.step([0.019, 0., 0.], [-0.001, 0., 0.], 0.002);
 //! assert!(contact.force[0] > 0.); // opposes penetration into the +X face
 //! ```
+#![warn(missing_docs)]
 use serde::{Deserialize, Serialize};
 
 /// Small, allocation-free three-dimensional operations used by control code.
 pub mod math {
     /// Cartesian vector; units are defined by the calling API.
     pub type V = [f64; 3];
+    /// Componentwise sum; callers provide compatible units and finite inputs.
     pub fn add(a: V, b: V) -> V {
         std::array::from_fn(|i| a[i] + b[i])
     }
+    /// Componentwise difference, with the same units as the operands.
     pub fn sub(a: V, b: V) -> V {
         std::array::from_fn(|i| a[i] - b[i])
     }
+    /// Scale every component by a scalar.
     pub fn mul(a: V, s: f64) -> V {
         a.map(|x| x * s)
     }
+    /// Euclidean dot product; resulting units are the product of operand units.
     pub fn dot(a: V, b: V) -> f64 {
         a.into_iter().zip(b).map(|(a, b)| a * b).sum()
     }
+    /// Euclidean length. Very large finite inputs may overflow the squared sum.
     pub fn norm(a: V) -> f64 {
         dot(a, a).sqrt()
     }
+    /// Limit vector length to a nonnegative finite cap, preserving direction.
+    /// Inputs must be finite and small enough for the squared norm not to overflow.
+    /// This arithmetic helper does not validate input or replace a device force guard.
     pub fn limit(a: V, cap: f64) -> V {
         let n = norm(a);
         mul(a, if n > cap { cap / n } else { 1. })
@@ -43,15 +52,23 @@ use math::*;
 /// Original models used to isolate surface, damping, deformation and dynamic issues.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Kind {
+    /// Axis-aligned solid cube with a spring/damper contact reaction.
     Cube,
+    /// Spherical fluid region with speed-dependent drag and upward buoyancy.
     Water,
+    /// Deformable sphere that latches a popped state at 35% indentation.
     Balloon,
+    /// Three simulated bodies joined by springs and attracted to the origin.
     Springs,
+    /// Horizontal surface resisting penetration below model Y = 0.
     Plane,
+    /// Uniform damping opposing motion in every direction.
     Viscous,
+    /// Periodic force wells on all three axes, with damping.
     Detents,
 }
 impl Kind {
+    /// All seven scenes in the presentation order used by the calibration app.
     pub const ALL: [Self; 7] = [
         Self::Cube,
         Self::Water,
@@ -61,6 +78,7 @@ impl Kind {
         Self::Viscous,
         Self::Detents,
     ];
+    /// Short human-readable scene label.
     pub fn name(self) -> &'static str {
         match self {
             Self::Cube => "Hard cube",
@@ -72,6 +90,7 @@ impl Kind {
             Self::Detents => "Magnetic detents",
         }
     }
+    /// Operator instructions describing the intended qualitative response.
     pub fn instructions(self) -> &'static str {
         match self {
             Self::Cube => {
@@ -102,10 +121,16 @@ impl Kind {
 /// Force is an unclamped model reaction. The hardware layer must limit it.
 #[derive(Clone, Copy, Debug)]
 pub struct Frame {
+    /// Unclamped tool reaction in model newtons; not measured physical force.
     pub force: V,
+    /// Contact proxy in model metres relative to the scene centre.
+    /// Equals the input pen position when no surface proxy is applied.
     pub proxy: V,
+    /// Three body centres in scene-relative model metres, used by the spring demo.
     pub bodies: [V; 3],
+    /// Balloon indentation divided by radius, clamped to [0, 1].
     pub deformation: f64,
+    /// Latched balloon rupture; recreate the effect to reinflate.
     pub popped: bool,
 }
 impl Default for Frame {
@@ -128,7 +153,9 @@ pub struct Effect {
     velocities: [V; 3],
 }
 impl Effect {
-    /// `radius` is a cube half-width or sphere radius, clamped to 0.2–100 model mm.
+    /// `radius` is a cube half-width or sphere radius in metres, clamped to
+    /// 0.2–100 model mm. Non-finite radii select the 20 mm default.
+    /// Construction resets deformation, rupture and body velocities.
     pub fn new(kind: Kind, radius: f64) -> Self {
         let radius = if radius.is_finite() {
             radius.clamp(0.0002, 0.1)
@@ -147,8 +174,11 @@ impl Effect {
             velocities: [[0.; 3]; 3],
         }
     }
-    /// Advances by at most 25 ms. Non-finite input returns zero force without
-    /// mutating the simulation. The caller should treat invalid input as a fault.
+    /// Advance using scene-relative position `p` in model metres, velocity `v`
+    /// in model m/s, and elapsed seconds `dt` in (0, 0.025].
+    /// Non-finite input or an invalid interval returns a default zero-force frame
+    /// without mutating the simulation. The caller should treat invalid input
+    /// as a fault. Returned reactions still require device-side force limits.
     pub fn step(&mut self, p: V, v: V, dt: f64) -> Frame {
         if p.iter().chain(&v).any(|x| !x.is_finite()) || !dt.is_finite() || dt <= 0. || dt > 0.025 {
             return Frame::default();

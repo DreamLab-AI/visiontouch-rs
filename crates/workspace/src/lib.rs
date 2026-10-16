@@ -20,6 +20,7 @@
 //! // Points outside the observed neighbourhoods are not silently filled.
 //! assert!(!cloud.contains([0., 0.01, 0.]));
 //! ```
+#![warn(missing_docs)]
 use std::collections::HashMap;
 
 /// Position in the caller's reference-model metres, with consistent origin/axes.
@@ -63,8 +64,11 @@ impl Policy {
 /// Invalid evidence is rejected, rather than silently dropping bad points.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
+    /// Support radius or margin is non-finite or outside the permitted range.
     InvalidPolicy,
+    /// A coordinate is non-finite or outside ±10 model metres.
     InvalidPoint,
+    /// Evidence exceeds the bounded storage limit [`MAX_POINTS`].
     TooManyPoints,
 }
 impl std::fmt::Display for Error {
@@ -81,11 +85,15 @@ impl std::error::Error for Error {}
 /// Geometric support along the whole directed segment, parameterized from 0 to 1.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SegmentReview {
+    /// The entire segment is covered by the shrunken sample neighbourhoods.
+    /// This does not assert physical clearance or authorize motion.
     Supported,
     /// First uncovered interval. Interior fractions in this interval are outside
     /// all evidence neighbourhoods; its endpoints may themselves be covered.
     Gap {
+        /// Beginning of the first uncovered interval, as a fraction in [0, 1].
         from: f64,
+        /// End of the first uncovered interval, as a fraction in [0, 1].
         to: f64,
     },
 }
@@ -136,6 +144,7 @@ impl EvidenceCloud {
     pub fn policy(&self) -> Policy {
         self.policy
     }
+    /// Original validated support observations, in model metres and insertion order.
     pub fn points(&self) -> &[Point] {
         &self.points
     }

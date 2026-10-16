@@ -1,4 +1,5 @@
 //! Host capabilities and bounded device readout through ppdev.
+#![warn(missing_docs)]
 
 pub mod device;
 
@@ -20,13 +21,16 @@ unsafe extern "C" {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Raw Linux ppdev host-mode bitmask. It describes host capabilities, not device readiness.
 pub struct Capabilities(pub u32);
 
 impl Capabilities {
+    /// Whether the host advertises EPP; successful peripheral negotiation is not implied.
     pub fn supports_epp(self) -> bool {
         self.0 & 4 != 0
     }
 
+    /// Names of recognized set capability bits; unknown bits remain available in the raw mask.
     pub fn names(self) -> Vec<&'static str> {
         [
             (1, "PCSPP"),
