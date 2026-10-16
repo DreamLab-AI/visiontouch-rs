@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Run reference software offline with no host device access.
+set -euo pipefail
+
+repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+vendor_dir="$repo_dir/vendor-original"
+state_dir="$vendor_dir/sandbox-state"
+mkdir -p -- "$state_dir"
+
+if ! command -v bwrap >/dev/null; then
+    echo "bubblewrap is required." >&2
+    exit 1
+fi
+if (( $# == 0 )); then
+    echo "Usage: $0 COMMAND [ARG ...]" >&2
+    echo "Reference files: /vendor (read-only); persistent output: /state" >&2
+    exit 2
+fi
+
+exec bwrap --unshare-all --die-with-parent --new-session \
+    --cap-drop ALL --clearenv \
+    --ro-bind /usr /usr \
+    --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib /lib64 \
+    --proc /proc --dev /dev --tmpfs /tmp --tmpfs /etc \
+    --ro-bind "$vendor_dir" /vendor --bind "$state_dir" /state \
+    --setenv HOME /state --setenv PATH /usr/bin:/bin --setenv LANG C \
+    --chdir /state -- "$@"

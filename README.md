@@ -1,12 +1,68 @@
 # haptics-rust
 
-A private hardware-archaeology project: a clean-room reimplementation, in Rust on Linux (CachyOS), of the host-side protocol stack for a late-1990s **SensAble PHANTOM** haptic device that connects over an **IEEE-1284 EPP parallel cable**. The original stack ran on Windows 98/ME/NT and is fully out of support. The intended output is an academic paper, not a software release.
+A private hardware-archaeology project: a clean-room reimplementation, in Rust on Linux (current host: Omarchy, Arch-based), of the host-side protocol stack for a late-1990s **SensAble PHANTOM** haptic device that connects over an **IEEE-1284 EPP parallel cable**. The original stack ran on Windows 98/ME/NT and is fully out of support. The intended output is an academic paper, not a software release.
 
 This repository is not affiliated with, endorsed by, or derived from code belonging to SensAble Technologies, Geomagic, or 3D Systems. Product names are used only to identify the hardware being studied.
 
 ## Status
 
-**Research phase complete; verdict is to proceed.** See [docs/01-verdict.md](docs/01-verdict.md). Implementation is starting from [docs/02-handoff-to-coding-agents.md](docs/02-handoff-to-coding-agents.md). No protocol code exists yet; the first deliverables are the trace decoder, the ppdev HAL, and a port probe.
+**Live Rust connection verified on the owner's 1.0A.** Windows and Linux reference drivers were downloaded and examined. The reference SDK initializes successfully using a software EPP transport that preserves control lines; the independent Rust reader receives real 16-byte packets and decodes six raw encoder counters. Two Rust runs received 55 complete packets and released the port. The reusable `haptics-device` SDK now provides bounded main-arm force output;
+zero and 0.1 N command checks completed with acknowledgements and shutdown.
+**Known issue:** the owner reports that motors do not stop pen motion at a block
+surface. Effective physical contact resistance remains unresolved; packet
+acknowledgements do not validate it. Physical calibration, wrist actuation and
+hard real-time guarantees remain unverified. See [driver examination](docs/research/driver-examination.md) and the [observed readout specification](docs/spec/10-device-readout.md).
+
+## Desktop physics app
+
+[Mass Lab](apps/mass-lab/README.md) is a native Rust 3D sandbox with blocks of
+editable mass, gravity, collisions, scene presets, pause/step/reset and impulses.
+The lightest block moves and spins freely; other blocks move only vertically.
+A compliant pen proxy computes load and inertia reactions for the device SDK. Launch **Mass Lab**
+from the desktop launcher or run:
+
+```sh
+tools/run-mass-lab
+```
+
+Place the stylus at the bottom of vertical travel and centred horizontally/in
+depth, then press **C** to set the pointer reference. Motion mapping is adjustable;
+Enable pen force feedback in the sidebar, or launch with `--force-feedback`.
+The force cap is 0.5 N with a 2% scene-force scale. Physical calibration and direct
+wrist torque remain unverified. Use `--no-device`
+for simulation only. See the app README for controls and tests.
+
+## Read the unit in Rust
+
+```sh
+cargo build -p device-readout
+tools/with-port-access timeout -s KILL 10s target/debug/device-readout /dev/parport0 50
+```
+
+This performs active device setup and reads 50 samples at about 10 Hz, printing
+CSV with six raw signed counters and the complete packet. It sends no force-output
+packets and loads no vendor libraries. Use with the identified unit, a clear
+workspace, and accessible power cutoff. See [readout instructions](tools/device-readout/README.md)
+for scope and limitations.
+
+## Run the Rust host query
+
+```sh
+cargo build --workspace
+tools/with-port-access target/debug/port-probe /dev/parport0
+```
+
+This queries advertised host capabilities without claiming or negotiating. It does
+not detect the unit or prove working EPP transactions. The current card reports
+`0x4f`: PCSPP, TRISTATE, EPP, ECP, SAFEININT.
+
+The [reference-call recorder](tools/port-recorder/README.md) captures ppdev ioctl
+arguments and data buffers for observation. It has been checked against ordinary
+files, the host capability query, and reference-driver captures on the actual unit.
+
+## Latest session handoff
+
+Read [docs/03-session-handoff-2026-10-16.md](docs/03-session-handoff-2026-10-16.md) first for the identified hardware, verified host state, corrections to earlier research, and immediate next steps. Earlier research includes assumptions that remain unverified.
 
 ## Read in this order
 
@@ -30,9 +86,9 @@ This repository is not affiliated with, endorsed by, or derived from code belong
 
 - **The protocol is not copyrightable; the driver binaries are.** UK CDPA 1988 s50BA permits observing and testing a lawfully owned program; s296A voids licence terms to the contrary; *SAS v World Programming* (CJEU C-406/10, and [2013] EWCA Civ 1482) holds that functionality, interfaces and data formats are not protected expression. Decompilation (s50B) is allowed for interoperability but restricts onward communication of what it yields, which matters for a paper.
 - **The rights holder is 3D Systems**, an active company, so this is not orphan IP. Nothing has ever been open-sourced by the owner. The foundational MIT patent (US 5,587,937) expired in 2013; UK private/experimental-use exemptions cover the rest.
-- **The device is a plain EPP peripheral.** No interface card. SensAble's own Linux driver was a userspace binary talking to `/dev/parport0` via ppdev. That means the whole register-level dialogue can be captured with `strace`, or via QEMU port passthrough tracing for the Windows stack, before anyone reaches for a logic analyser or a disassembler.
-- **Nobody has done this before.** No public reverse engineering of the parallel PHANTOM protocol was found. The mainline `drivers/misc/phantom.c` covers only the later PCI-card interface.
-- **The Rust side is greenfield.** There are no `parport`/`ppdev` crates on crates.io. CachyOS ships `parport`, `parport_pc`, `ppdev` as modules; `linux-cachyos-rt-bore` plus CPU isolation and `SCHED_FIFO` is the right setup for a 1 kHz loop, all in userspace.
+- **The identified unit is a PHANToM 1.0A with a direct DB25 connection.** The independent Rust implementation now exchanges packets using software EPP through ppdev; physical force calibration remains unverified.
+- **Prior parallel-interface work exists.** [vintagehaptics](https://github.com/forsslund/vintagehaptics) reports a working userspace driver; compatibility with this unit and the provenance of any reused protocol facts require review. The mainline `drivers/misc/phantom.c` covers a different PCI interface.
+- **The Rust workspace is implemented.** It includes transport, device SDK, capture/readout tools and the desktop simulator. Real-time kernel and scheduling choices still require measured requirements on the actual host.
 
 ## Plan
 

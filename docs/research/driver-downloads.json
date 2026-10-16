@@ -1,0 +1,65 @@
+[
+  {
+    "file": "Phantom_Device_Drivers_5.1.9_RELEASE.exe",
+    "url": "https://s3.amazonaws.com/dl.3dsystems.com/binaries/Sensable/driver/Phantom_Device_Drivers_5.1.9_RELEASE.exe",
+    "download_date": "2026-10-16",
+    "bytes": 35337600,
+    "sha256": "b78da4372faac2194929eb42604a94ea76bfe2376102e54d14009cf9d1e7c0b1"
+  },
+  {
+    "file": "openhaptics_3.4-0-developer-edition-amd64.tar.gz",
+    "url": "https://s3.amazonaws.com/dl.3dsystems.com/binaries/support/downloads/KB+Files/Open+Haptics/openhaptics_3.4-0-developer-edition-amd64.tar.gz",
+    "download_date": "2026-10-16",
+    "bytes": 18124800,
+    "sha256": "9068e039a4a4d8c0a25ec672a1c41dfe4e791509d78b81b9a4bfe2fd6e72271f"
+  },
+  {
+    "file": "geomagic_touch_device_driver_2016.1-1-amd64.tar.gz",
+    "url": "https://s3.amazonaws.com/dl.3dsystems.com/binaries/support/downloads/KB+Files/Open+Haptics/geomagic_touch_device_driver_2016.1-1-amd64.tar.gz",
+    "download_date": "2026-10-16",
+    "bytes": 30535680,
+    "sha256": "5c10fbe339cb7dd8f9b489d240b574875322bcd87f623d9d0a2ae30ec4bd586f"
+  },
+  {
+    "file": "OpenHapticsAE_Linux_v3_0.zip",
+    "url": "https://raw.githubusercontent.com/jhu-cisst-external/phantom-omni-1394-drivers/master/files/OpenHapticsAE_Linux_v3_0.zip",
+    "download_date": "2026-10-16",
+    "bytes": 87543312,
+    "sha256": "a88836a6100bc8f9db0bbb341495f082f04ffb6fc0c349e64f37fddc0e94e904"
+  },
+  {
+    "file": "Linux_JUJU_PDD_64-bit.tgz",
+    "url": "https://raw.githubusercontent.com/jhu-cisst-external/phantom-omni-1394-drivers/master/files/Linux_JUJU_PDD_64-bit.tgz",
+    "download_date": "2026-10-16",
+    "bytes": 489953,
+    "sha256": "08a3f331cc2026e22c780d33f98284d3fe6f4bae7fa2b79fa89bfffa254764a8"
+  },
+  {
+    "file": "Premium1.0_1.5_HF_Device_guide.pdf",
+    "url": "https://s3.amazonaws.com/dl.3dsystems.com/binaries/Sensable/UserGuide/Premium1.0_1.5_HF_Device_guide.pdf",
+    "download_date": "2026-10-16",
+    "bytes": 590966,
+    "sha256": "7c1b5b60278cfb99af98ffe26fca4431dffc920329e154b45fd31d7bae8d582c"
+  },
+  {
+    "file": "libncurses5_6.3-2ubuntu0.3_amd64.deb",
+    "url": "https://archive.ubuntu.com/ubuntu/pool/universe/n/ncurses/libncurses5_6.3-2ubuntu0.3_amd64.deb",
+    "download_date": "2026-10-16",
+    "bytes": 106866,
+    "sha256": "58da01991712c6856af0658dc5e9cb533c1a6854ab950055ade185e35bc9c276"
+  },
+  {
+    "file": "libtinfo5_6.3-2ubuntu0.3_amd64.deb",
+    "url": "https://archive.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.3_amd64.deb",
+    "download_date": "2026-10-16",
+    "bytes": 100004,
+    "sha256": "4df4288404108f1a156d014e8764a064e977e34e6d44931ab60451694c03c90d"
+  },
+  {
+    "file": "libglw1-mesa_8.0.0-1.1build1_amd64.deb",
+    "url": "https://archive.ubuntu.com/ubuntu/pool/universe/g/glw/libglw1-mesa_8.0.0-1.1build1_amd64.deb",
+    "download_date": "2026-10-16",
+    "bytes": 10112,
+    "sha256": "30361e98ed5c6fc94cf92c04adde9bc8d442181e0343a54c48427d8b6340ecd5"
+  }
+]

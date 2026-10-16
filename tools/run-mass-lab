@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+cargo build --manifest-path "$repo_dir/Cargo.toml" --target-dir "$repo_dir/target" -p mass-lab
+exec "$repo_dir/tools/with-port-access" "$repo_dir/target/debug/mass-lab" "$@"

@@ -1,6 +1,6 @@
 # Handoff brief for coding agents
 
-Read `README.md`, `docs/01-verdict.md`, and `docs/clean-room/POLICY.md` before writing anything.
+Read `README.md`, `docs/03-session-handoff-2026-10-16.md`, `docs/01-verdict.md`, and `docs/clean-room/POLICY.md` before writing anything. The latest session handoff corrects assumptions in the earlier research and takes precedence for host facts and immediate task order.
 
 ## Non-negotiables
 
@@ -13,19 +13,19 @@ Read `README.md`, `docs/01-verdict.md`, and `docs/clean-room/POLICY.md` before w
 
 ## Suggested first tasks, in order
 
-1. **Trace decoder** (`tools/trace-decode`): parse `strace -tt -T` output and QEMU `parallel_ioport_*` trace logs into a common timeline format `(t_us, register, dir, value)`; emit JSON/CSV. Also import sigrok VCD. This is the input to everything else and needs no hardware.
+1. **Trace decoder** (`tools/trace-decode`): parse verified full-buffer strace output and supported QEMU parallel trace logs into a common timeline format `(t_us, register, dir, value)`; emit JSON/CSV. Also import sigrok VCD. This is the input to everything else and needs no hardware.
 2. **`hal` crate**: a `PortIo` trait; `ppdev` backend via `nix` ioctl bindings for `include/uapi/linux/ppdev.h` (PPCLAIM/PPRELEASE/PPEXCL, PPRDATA/PPWDATA, PPRCONTROL/PPWCONTROL/PPFCONTROL, PPRSTATUS, PPDATADIR, PPNEGOT, PPSETMODE/PPGETMODE, PPGETMODES, PPSETTIME, PPWCTLONIRQ/PPCLRIRQ) plus EPP `read`/`write`; a `replay` backend that plays a decoded timeline and asserts the caller's writes match. `ioperm` backend later.
-3. **Port probe tool** (`tools/port-probe`): open `/dev/parport0`, claim, report `PPGETMODES`, negotiate EPP, release. Confirms the PCIe card can do EPP at all. Safe to run with the device connected; it writes nothing to the data lines.
+3. **Query-only port capability tool** (`tools/port-probe`): report advertised capabilities without negotiation, register writes, or data transfers. Audit open/close and claim/release behaviour before hardware use. Advertised EPP support does not establish working EPP transactions. Treat negotiation as a separate deliberate hardware operation: it can change port signals and requires the capture safety prerequisites in the latest handoff.
 4. **`protocol` crate**: empty until `docs/spec/` has its first section. Then implement exactly what the spec says, with replay tests against the captures that produced the spec.
 5. **`device` and `daemon`**: after `protocol` decodes a full servo cycle from a capture.
 
 ## Environment facts
 
-- CachyOS: `parport`, `parport_pc`, `ppdev`, `parport_serial` are modules; `modprobe` them and add a udev rule for `/dev/parport0` group access.
+- Current host: Omarchy (Arch-based), with `parport`, `parport_pc`, and `ppdev` already loaded. `/dev/parport0` exists as `root:lp` mode 0660; the account belongs to `lp`, but the agent process still lacks that supplementary group. Use `tools/with-port-access COMMAND [ARG ...]` to launch port tools with refreshed account groups from the stale session. Access has been verified this way as John. Do not recreate the node or relax its permissions.
 - PCIe cards do not sit at 0x378; always discover the base address via ppdev, never hardcode.
 - USB-to-parallel adapters cannot be used; printer-class only.
-- No `parport`/`ppdev` crates exist on crates.io; write the bindings with `nix` or `rustix`.
-- Real-time: `thread-priority` crate or raw `libc` for SCHED_FIFO; `mlockall`; `clock_nanosleep` with `TIMER_ABSTIME`; `linux-cachyos-rt-bore` for the final loop.
+- Reassess available Rust bindings when implementation begins; the earlier crate-availability research is not a current dependency inventory.
+- Real-time scheduling, memory locking, absolute deadlines, and kernel choices come after capture and measurement; do not assume a CachyOS kernel on this host.
 
 ## Where things go
 

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$repo_dir"
+cargo build -p port-recorder --target-dir "$repo_dir/target"
+cc -shared -fPIC -Wall -Wextra -Werror -O2 tools/port-recorder/shim.c \
+    tools/port-recorder/ioctl-entry.S \
+    target/debug/libport_recorder.a -Wl,--exclude-libs,ALL \
+    -ldl -lpthread -lm -o target/debug/libport_capture.so
+echo "$repo_dir/target/debug/libport_capture.so"

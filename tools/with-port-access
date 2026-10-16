@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Refresh the invoking user's supplementary groups for a port tool.
+set -euo pipefail
+
+if (( $# == 0 )); then
+    echo "Usage: $0 COMMAND [ARG ...]" >&2
+    exit 2
+fi
+
+if [[ -r /dev/parport0 && -w /dev/parport0 ]]; then
+    exec "$@"
+fi
+
+# Run as the same user, never root. sudo initializes current account groups.
+if (( EUID == 0 )); then
+    echo "Run this launcher as your ordinary user." >&2
+    exit 1
+fi
+exec sudo -n -u "$(id -un)" -- "$@"
