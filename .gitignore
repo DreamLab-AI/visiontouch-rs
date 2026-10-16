@@ -18,9 +18,17 @@ Cargo.lock.bak
 /captures/**/*.sr
 /captures/**/*.vcd
 /captures/**/*.pcapng
+/captures/calibration/
 
 # Editor / OS
 .vscode/
 .idea/
 *.swp
 .DS_Store
+
+# Python analysis-tool caches
+/tools/**/__pycache__/
+/apps/workspace-viewer/node_modules/
+/captures/device-photos/
+/apps/workspace-viewer/data/
+/apps/workspace-viewer/photos

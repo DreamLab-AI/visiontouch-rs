@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>PHANToM · Workspace Observatory</title>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./node_modules/three/build/three.module.js",
+          "three/addons/": "./node_modules/three/examples/jsm/"
+        }
+      }
+    </script>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <div>
+        <small>HAPTICS / HARDWARE ARCHAEOLOGY</small>
+        <h1>Workspace Observatory</h1>
+      </div>
+      <span class="pill">OFFLINE · NO MOTOR CONNECTION</span>
+    </header>
+    <main>
+      <aside>
+        <section>
+          <small>01 / RECORDED EVIDENCE</small>
+          <h2 id="captureTitle">Load a sweep</h2>
+          <p id="summary">
+            Input recordings and model coordinates stay on this computer.
+          </p>
+          <label class="button"
+            >Open capture JSON<input
+              type="file"
+              id="file"
+              accept=".json"
+              hidden /></label
+          ><button id="latest">Load latest local capture</button>
+          <p id="message" role="status"></p>
+        </section>
+        <section>
+          <small>02 / REPLAY THE ARM</small>
+          <div class="row">
+            <button id="play">Play</button><output id="time">0.00 s</output>
+          </div>
+          <input
+            type="range"
+            id="timeline"
+            min="0"
+            max="1"
+            step="1"
+            value="0"
+            aria-label="Recorded pose"
+          />
+          <p id="angles"></p>
+          <label
+            ><input type="checkbox" id="arm" checked /> Reconstructed
+            armature</label
+          ><label
+            ><input type="checkbox" id="points" checked /> Measured model
+            positions</label
+          ><label
+            ><input type="checkbox" id="voxels" /> Observed-cell surface</label
+          ><label><input type="checkbox" id="hull" /> Outer convex bound</label>
+          <p class="warning">
+            The convex bound fills gaps and concavities. It is not a safe
+            operating volume.
+          </p>
+          <label
+            >Cell spacing <output id="cellValue">6 mm</output
+            ><input type="range" id="cell" min="2" max="15" step="1" value="6"
+          /></label>
+          <p id="coverage"></p>
+        </section>
+        <section>
+          <small>03 / MODEL ASSUMPTIONS</small
+          ><label
+            >Upper link <output id="upperValue">139.7 mm</output
+            ><input
+              id="upper"
+              type="range"
+              min="100"
+              max="190"
+              step=".1"
+              value="139.7" /></label
+          ><label
+            >Lower link <output id="lowerValue">139.7 mm</output
+            ><input
+              id="lower"
+              type="range"
+              min="100"
+              max="190"
+              step=".1"
+              value="139.7"
+          /></label>
+          <p>
+            Link defaults come from the existing reference kinematic model.
+            Chassis, housings and gimbal dimensions are visual estimates from
+            the owner's photographs.
+          </p>
+          <p id="residual"></p>
+          <button id="reset">Reset model & view</button
+          ><button id="export">Export scene (.glb)</button>
+        </section>
+        <section>
+          <small>04 / SOURCE PHOTOGRAPHS</small>
+          <div class="photos">
+            <a href="photos/PXL_20261016_193305912.jpg" target="_blank"
+              ><img
+                src="photos/PXL_20261016_193305912.jpg"
+                alt="Owner's complete PHANToM arm" /></a
+            ><a href="photos/PXL_20261016_193315075.jpg" target="_blank"
+              ><img
+                src="photos/PXL_20261016_193315075.jpg"
+                alt="Parallel links and base pivot" /></a
+            ><a href="photos/PXL_20261016_193321358.jpg" target="_blank"
+              ><img
+                src="photos/PXL_20261016_193321358.jpg"
+                alt="Pen gimbal close-up"
+            /></a>
+          </div>
+          <p>
+            Housing appearance does not identify active wrist motors. Hidden
+            cable routing and dimensions remain unresolved.
+          </p>
+        </section>
+      </aside>
+      <div id="viewport">
+        <div class="overlay">
+          <span class="dot"></span> Recorded sweep
+          <span class="gold">●</span> Reference-model arm
+          <p>Drag to orbit · wheel to zoom · right-drag to pan</p>
+        </div>
+        <div id="poseLabel">Awaiting recording</div>
+        <canvas id="scene"></canvas>
+      </div>
+    </main>
+    <script type="module" src="main.mjs"></script>
+  </body>
+</html>

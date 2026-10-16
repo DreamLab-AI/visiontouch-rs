@@ -1,5 +1,61 @@
 # Session handoff — 2026-10-16
 
+## Latest continuation — sweep evidence and offline reconstruction
+
+This section supersedes earlier runtime/force-session notes below. The owner
+powered the unit off after an explicitly requested input-only sweep recording.
+The recording stopped cleanly: 31,271 packets in 74.109 s; no force session.
+The final resting pose is only approximately bottom-centre on the desk. Evidence
+and measured stability are in `docs/evidence/input-only-sweep-20261016/`.
+
+- Calibration Studio now defaults to motor-off sweep acquisition, observed-cloud
+  display, manually chosen zero and evidence export. Swept maps do not grant
+  force authority. Advanced six-bound box calibration remains available but does
+  not prove its corners reachable. Region/path validation needs further work.
+- `apps/workspace-viewer` replays the included owner sweep in Three.js with an
+  adjustable photo-informed armature, observed-cell surface, optional convex outer
+  bound and GLB export. `npm ci && npm start` there serves localhost:8765.
+- The uploaded root ZIP was preserved via fast-forward to the GitHub upload.
+  Original extracted images remain local/ignored; the root owner archive is tracked.
+- Main-arm link defaults are from the existing reference model. No precise
+  dimensions, wrist torque assignment, thermal trip or safe usable volume was
+  inferred from photographs. Physical resistance testing remains outstanding.
+- Verification includes workspace unit/doc tests, audio tests, viewer unit and
+  Chromium tests, Clippy and both native graphics smoke modes. Test details are
+  in the application READMEs. No live tests after the owner powered down.
+
+
+## Latest continuation — Calibration Studio
+
+The older running-app notes below are historical. On the latest check no device
+application held `/dev/parport0`; no powered tests were run after the input-only
+baseline. The owner resumed work after switching to tmux.
+
+- `apps/calibration` is the native guided calibration/demo app. Launch offline
+  with `tools/run-calibration --demo`; normal launch connects input-only.
+- Capture bottom and six comfortable bounds, enter working coordinates, export
+  calibration evidence with output off, then hold for a slow zero move or one of
+  seven canonical scenes. Fresh captures are required on every connection.
+- `crates/effects` supplies independently written effects with inline docs.
+- SDK review fixes share continuous absolute encoder history between pose and
+  force calculations and classify failed shutdown as an I/O fault requiring
+  reconnection. Command-limit release is an independent software policy.
+- Attempts save demand, guarded output, exact motor offsets, timing, command-limit
+  status and mapping evidence. Manual sound/surface-temperature observations and
+  external WAV paths can be attached. `tools/analyze-motor-audio` performs offline
+  descriptive spectral comparisons; it does not diagnose safe motor loading.
+- Workspace tests passed (44 unit tests after the additional rollover regression,
+  plus two doc tests); audio checks passed (6); Clippy and native graphics smoke
+  passed. Later edits should rerun the checks appropriate to those changes.
+- Physical force, operator resistance, measured temperature and overload-release
+  behaviour remain unvalidated on this aged unit. Keep the existing conservative
+  ceilings; do not raise them based on audio or historical product ratings alone.
+- D-0001 reference driver investigation is complete. D-0002 old Dice send-wrapper
+  evidence confirms disable on nonzero force-send error. Bounded newer example
+  review is complete (P-0041): recovery policies differ; no universal physical
+  overload threshold established. Vendor artifacts and detailed Evidence remain ignored.
+
+
 ## Current continuation — SDK and physical feedback
 
 **Unresolved physical feedback issue (owner report, P-0033):** “the motors don't

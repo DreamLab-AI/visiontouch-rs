@@ -13,6 +13,31 @@ surface. Effective physical contact resistance remains unresolved; packet
 acknowledgements do not validate it. Physical calibration, wrist actuation and
 hard real-time guarantees remain unverified. See [driver examination](docs/research/driver-examination.md) and the [observed readout specification](docs/spec/10-device-readout.md).
 
+## Calibration and canonical demos
+
+[Calibration Studio](apps/calibration/README.md) provides guided working-volume
+sweep capture, an advanced six-bound held slow move to zero, and cube, water, balloon, three-body springs,
+plane, viscosity and detent scenes. Run `tools/run-calibration --demo` for an
+entirely offline preview, or `tools/run-calibration` for input-only connection
+and guided calibration. Attempts record model demand, guarded commands and
+operator sound/temperature observations. See the [overload investigation](docs/research/overload-and-calibration.md)
+for evidence and remaining physical uncertainties.
+
+## Workspace reconstruction
+
+[Workspace Observatory](apps/workspace-viewer/README.md) is an offline Three.js
+reconstruction of this unit with replay of the owner's recorded sweep. It shows
+observed points, sampled-cell surfaces and a separately labelled convex bound;
+none certifies a safe operating volume. Adjustable links and GLB export support
+comparison with the owner's photographs. It never connects to the device.
+
+```sh
+cd apps/workspace-viewer
+npm ci
+npm start
+# http://127.0.0.1:8765
+```
+
 ## Desktop physics app
 
 [Mass Lab](apps/mass-lab/README.md) is a native Rust 3D sandbox with blocks of

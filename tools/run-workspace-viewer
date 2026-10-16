@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+cd -- "$repo_dir"
+if [[ ! -f apps/workspace-viewer/node_modules/three/package.json ]]; then
+  npm ci --prefix apps/workspace-viewer
+fi
+python3 - <<'PY'
+from pathlib import Path
+import zipfile
+root=Path.cwd(); archive=root/'Photos-1-001 (1).zip'; photos=root/'captures/device-photos'
+names=['PXL_20261016_193305912.jpg','PXL_20261016_193315075.jpg','PXL_20261016_193321358.jpg']
+if archive.exists():
+    photos.mkdir(parents=True,exist_ok=True)
+    with zipfile.ZipFile(archive) as z:
+        for name in names:
+            target=photos/name
+            if not target.exists():
+                info=z.getinfo(name)
+                if info.file_size>20_000_000:raise ValueError('Unexpected photo size')
+                target.write_bytes(z.read(name))
+link=root/'apps/workspace-viewer/photos'
+if photos.exists() and not link.exists() and not link.is_symlink():
+    link.symlink_to('../../captures/device-photos',target_is_directory=True)
+PY
+printf '%s\n' 'Workspace Observatory: http://127.0.0.1:8765 (offline viewer; no hardware access)'
+exec python3 -m http.server 8765 --bind 127.0.0.1 --directory "$repo_dir/apps/workspace-viewer"

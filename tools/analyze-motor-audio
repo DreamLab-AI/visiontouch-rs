@@ -1,0 +1,259 @@
+#!/usr/bin/env python3
+"""Describe recorded PCM audio; never infer torque, overload, or motor safety."""
+
+import argparse
+import array
+import cmath
+import csv
+import hashlib
+import json
+import math
+import os
+from pathlib import Path
+import statistics
+import sys
+import tempfile
+import wave
+
+WINDOW_SECONDS = 0.05
+FFT_SIZE = 2048
+MAX_DURATION_SECONDS = 600
+MIN_DBFS = -180.0
+BANDS = (("0_250_hz", 0, 250), ("250_1000_hz", 250, 1000),
+         ("1000_4000_hz", 1000, 4000), ("4000_10000_hz", 4000, 10000),
+         ("10000_nyquist_hz", 10000, float("inf")))
+SCORE_SCALES = {"rms_dbfs": 3.0, "spectral_centroid_hz": 50.0,
+                "high_frequency_fraction": 0.02, "spectral_flatness": 0.05,
+                "peak_bin_fraction": 0.05}
+
+
+class AudioError(ValueError):
+    """A recording is unsupported or incomplete."""
+
+
+def db_power(value):
+    return max(MIN_DBFS, 10 * math.log10(max(value, 1e-18)))
+
+
+def fft(values):
+    """In-place radix-two FFT of a caller-owned complex list."""
+    n = len(values)
+    j = 0
+    for i in range(1, n):
+        bit = n >> 1
+        while j & bit:
+            j ^= bit
+            bit >>= 1
+        j ^= bit
+        if i < j:
+            values[i], values[j] = values[j], values[i]
+    length = 2
+    while length <= n:
+        step = cmath.exp(-2j * math.pi / length)
+        for start in range(0, n, length):
+            weight = 1 + 0j
+            half = length // 2
+            for offset in range(half):
+                a = values[start + offset]
+                b = values[start + offset + half] * weight
+                values[start + offset], values[start + offset + half] = a + b, a - b
+                weight *= step
+        length *= 2
+    return values
+
+
+def decode_pcm(data, width):
+    if width == 3:
+        return [int.from_bytes(data[i:i + 3], "little", signed=True) / 8388608
+                for i in range(0, len(data), 3)]
+    samples = array.array("h" if width == 2 else "i")
+    samples.frombytes(data)
+    if sys.byteorder != "little":
+        samples.byteswap()
+    scale = float(1 << (width * 8 - 1))
+    return [sample / scale for sample in samples]
+
+
+def spectrum(channels):
+    # Average channel powers, preserving opposite-phase stereo signals.
+    n = min(len(channels[0]), FFT_SIZE)
+    start = (len(channels[0]) - n) // 2
+    window = [0.5 - 0.5 * math.cos(2 * math.pi * i / (n - 1))
+              for i in range(n)] if n > 1 else [1.0]
+    denominator = FFT_SIZE * sum(w * w for w in window) * len(channels)
+    power = [0.0] * (FFT_SIZE // 2 + 1)
+    for channel in channels:
+        segment = channel[start:start + n]
+        mean = statistics.fmean(segment)
+        values = [(value - mean) * weight for value, weight in zip(segment, window)]
+        if not any(values):
+            continue
+        transformed = fft([complex(value) for value in values] + [0j] * (FFT_SIZE - n))
+        for k in range(len(power)):
+            multiplier = 1 if k in (0, FFT_SIZE // 2) else 2
+            power[k] += abs(transformed[k]) ** 2 * multiplier / denominator
+    return power
+
+
+def describe(values):
+    ordered = sorted(values)
+    median = statistics.median(ordered)
+    return {"min": ordered[0], "max": ordered[-1], "mean": statistics.fmean(ordered),
+            "median": median, "mad": statistics.median(abs(v - median) for v in ordered),
+            "p05": ordered[round((len(ordered) - 1) * 0.05)],
+            "p95": ordered[round((len(ordered) - 1) * 0.95)]}
+
+
+def analyze(path):
+    path = Path(path).resolve(strict=True)
+    if not path.is_file():
+        raise AudioError("the input must be a regular WAV file")
+    if path.stat().st_size > 1024 ** 3:
+        raise AudioError("WAV exceeds the 1 GiB input limit")
+    try:
+        source = wave.open(str(path), "rb")
+    except (wave.Error, EOFError) as error:
+        raise AudioError(f"unsupported or invalid PCM WAV: {error}") from error
+    with source:
+        channels, width, rate, frames = (source.getnchannels(), source.getsampwidth(),
+                                         source.getframerate(), source.getnframes())
+        if source.getcomptype() != "NONE" or width not in (2, 3, 4):
+            raise AudioError("use uncompressed signed integer PCM WAV with 16, 24, or 32 bits")
+        if channels not in (1, 2):
+            raise AudioError("only mono and stereo recordings are supported")
+        if not 8000 <= rate <= 192000:
+            raise AudioError("sample rate must be between 8,000 and 192,000 Hz")
+        if frames < 2 or frames / rate > MAX_DURATION_SECONDS:
+            raise AudioError("recording must contain at least two frames and last at most 600 seconds")
+        with path.open("rb") as recording:
+            digest = hashlib.file_digest(recording, "sha256").hexdigest()
+        step = round(rate * WINDOW_SECONDS)
+        rows, previous, position = [], None, 0
+        while position < frames:
+            count = min(step, frames - position)
+            data = source.readframes(count)
+            if len(data) != count * channels * width:
+                raise AudioError("truncated WAV: PCM bytes do not match its declared frame count")
+            decoded = decode_pcm(data, width)
+            channel_values = [decoded[c::channels] for c in range(channels)]
+            power = spectrum(channel_values)
+            total = sum(power)
+            normalized = [value / total for value in power] if total > 1e-18 else [0.0] * len(power)
+            centroid = sum(k * rate / FFT_SIZE * value for k, value in enumerate(normalized))
+            flatness = (math.exp(statistics.fmean(math.log(max(value, 1e-30)) for value in power))
+                        / (total / len(power))) if total > 1e-18 else 0.0
+            row = {"start_seconds": position / rate, "end_seconds": (position + count) / rate,
+                   "source_sha256": digest, "rms_dbfs": db_power(statistics.fmean(v * v for v in decoded)),
+                   "peak_dbfs": db_power(max(abs(v) for v in decoded) ** 2),
+                   "dc_offset": statistics.fmean(decoded),
+                   "spectral_centroid_hz": centroid, "spectral_flatness": min(1.0, flatness),
+                   "peak_bin_fraction": max(normalized),
+                   "spectral_flux": sum(max(0.0, a - b) for a, b in zip(normalized, previous))
+                   if previous is not None else 0.0}
+            for name, low, high in BANDS:
+                band_power = sum(value for k, value in enumerate(power)
+                                 if low <= k * rate / FFT_SIZE < high)
+                row[f"band_{name}_dbfs"] = db_power(band_power)
+                row[f"band_{name}_fraction"] = band_power / total if total > 1e-18 else 0.0
+            row["high_frequency_fraction"] = sum(value for k, value in enumerate(normalized)
+                                                 if k * rate / FFT_SIZE >= 4000)
+            rows.append(row)
+            previous, position = normalized, position + count
+    metric_names = [name for name in rows[0] if name not in ("start_seconds", "end_seconds", "source_sha256")]
+    return {"source": {"path": str(path), "sha256": digest, "size_bytes": path.stat().st_size,
+                        "duration_seconds": frames / rate, "sample_rate_hz": rate,
+                        "channels": channels, "bits_per_sample": width * 8, "frames": frames},
+            "window_count": len(rows), "features": {name: describe([r[name] for r in rows])
+                                                       for name in metric_names}}, rows
+
+
+def compare(report, rows, baseline, threshold):
+    model = {name: {"median": baseline["features"][name]["median"],
+                    "scale": max(1.4826 * baseline["features"][name]["mad"], floor)}
+             for name, floor in SCORE_SCALES.items()}
+    changed = 0
+    for row in rows:
+        scores = {name: (row[name] - item["median"]) / item["scale"] for name, item in model.items()}
+        # Louder/higher HF energy and any spectral-shape changes are descriptive cues.
+        scores = {name: max(0.0, score) if name in ("rms_dbfs", "high_frequency_fraction")
+                  else abs(score) for name, score in scores.items()}
+        row["baseline_change_score"] = max(scores.values())
+        row["changed_relative_to_baseline"] = bool(row["rms_dbfs"] > -100 and
+                                                   row["baseline_change_score"] >= threshold)
+        row["largest_change_feature"] = max(scores, key=scores.get)
+        changed += row["changed_relative_to_baseline"]
+    report["baseline_comparison"] = {"source": baseline["source"], "model": model,
+                                     "score_threshold": threshold, "signal_gate_dbfs": -100,
+                                     "changed_windows": changed, "changed_fraction": changed / len(rows),
+                                     "interpretation": "Acoustic feature changes only; no motor-load classification."}
+
+
+def write_reports(prefix, report, rows):
+    prefix = Path(prefix)
+    prefix.parent.mkdir(parents=True, exist_ok=True)
+    json_path, csv_path = Path(str(prefix) + ".json"), Path(str(prefix) + ".csv")
+    for destination, kind in ((json_path, "json"), (csv_path, "csv")):
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="",
+                                             dir=destination.parent, delete=False) as output:
+                temporary = output.name
+                if kind == "json":
+                    json.dump(report, output, indent=2, allow_nan=False)
+                    output.write("\n")
+                else:
+                    writer = csv.DictWriter(output, fieldnames=list(rows[0]))
+                    writer.writeheader()
+                    writer.writerows(rows)
+            os.replace(temporary, destination)
+        finally:
+            if temporary and os.path.exists(temporary):
+                os.unlink(temporary)
+    return json_path, csv_path
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("wav", type=Path)
+    parser.add_argument("--baseline", type=Path, help="reference PCM WAV with matching rate and channel count")
+    parser.add_argument("--output", type=Path, help="output prefix; writes PREFIX.json and PREFIX.csv")
+    parser.add_argument("--threshold", type=float, default=6.0, help="feature-change threshold (default: 6)")
+    args = parser.parse_args(argv)
+    try:
+        if not math.isfinite(args.threshold) or args.threshold <= 0:
+            raise AudioError("threshold must be a finite positive number")
+        report, rows = analyze(args.wav)
+        report.update({"schema_version": 1, "purpose": "Offline acoustic baseline comparison",
+                       "method": {"window_seconds": WINDOW_SECONDS, "fft_size": FFT_SIZE,
+                                  "spectrum": "DC-removed Hann-windowed channel powers, averaged across channels",
+                                  "spectral_sample_frames": min(round(report["source"]["sample_rate_hz"] * WINDOW_SECONDS), FFT_SIZE),
+                                  "dbfs_floor": MIN_DBFS},
+                       "limitations": ["No microphone access, recording, playback, or device control.",
+                                       "Acoustic changes can reflect speech, handling, room noise, gain, or position.",
+                                       "Features do not measure torque, force, temperature, overload, or safe operation.",
+                                       "No validated motor-labouring classifier; human labels and independent measurements are required.",
+                                       "At high sample rates the FFT uses the centred 2048-frame excerpt of each 50 ms window.",
+                                       "No absolute acoustic calibration or automatic gain correction."]})
+        if args.baseline:
+            baseline, _ = analyze(args.baseline)
+            for field in ("sample_rate_hz", "channels"):
+                if baseline["source"][field] != report["source"][field]:
+                    raise AudioError(f"baseline and recording must have matching {field}")
+            compare(report, rows, baseline, args.threshold)
+        prefix = args.output if args.output else args.wav.with_name(args.wav.stem + "-motor-audio")
+        destinations = [Path(str(prefix) + suffix).resolve() for suffix in (".json", ".csv")]
+        protected = {args.wav.resolve()} | ({args.baseline.resolve()} if args.baseline else set())
+        if protected.intersection(destinations):
+            raise AudioError("output paths must not overwrite an input recording")
+        paths = write_reports(prefix, report, rows)
+        print("Acoustic features only; no motor-load or safety classification.")
+        for path in paths:
+            print(path)
+        return 0
+    except (AudioError, OSError, wave.Error, EOFError) as error:
+        print(f"analyze-motor-audio: {error}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

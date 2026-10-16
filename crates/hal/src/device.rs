@@ -306,7 +306,11 @@ impl DeviceReader {
         };
         let second = self.send_motor_packet([0; 3], 0xc5, next);
         self.force_sequence = None;
-        first.and(read).and(second)
+        let result = first.and(read).and(second);
+        if result.is_err() {
+            self.healthy = false;
+        }
+        result
     }
 
     fn release(&mut self) -> io::Result<()> {

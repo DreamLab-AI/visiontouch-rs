@@ -560,10 +560,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "haptics-calibration"
+version = "0.1.0"
+dependencies = [
+ "egui-macroquad",
+ "haptics-device",
+ "haptics-effects",
+ "macroquad",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "haptics-device"
 version = "0.1.0"
 dependencies = [
  "haptics-hal",
+]
+
+[[package]]
+name = "haptics-effects"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

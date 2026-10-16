@@ -46,3 +46,12 @@ investigation before claiming validated physical feedback.
 
 See [force specification](../../docs/spec/12-force-feedback.md) for provenance,
 model equations, lifecycle and application coupling.
+
+`EncoderState::continuous_counts()` maintains absolute unwrapped history;
+`position_m()` and the device force transform share that history. `recenter()`
+only resets relative counters. `ForceLimits` can lower the SDK ceilings and
+optionally latch a sustained-command-limit release; `UNIT_DERATING` scales force,
+slew and DAC ceilings once. Neither facility measures actual motor load.
+After a failed sample, `take_force_fault()` distinguishes a successfully stopped
+command-limit trip from an I/O failure. Failed shutdown always requires closing
+and reconnecting; it cannot be reported as a recoverable software trip.

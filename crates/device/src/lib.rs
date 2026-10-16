@@ -1,5 +1,44 @@
 //! Reusable device state and bounded force feedback. See docs/spec/12-force-feedback.md.
 //! The reference kinematic model is not a physical calibration of this unit.
+//!
+//! # Lifecycle
+//!
+//! Connect with output disabled, acquire/validate the pose, configure stricter
+//! limits if needed, then explicitly enable feedback. A worker must call
+//! [`Device::sample`] continuously, even when the UI has no new force. Every
+//! request carries its original [`Instant`]; never refresh a stale request's time.
+//! Read/acknowledgement errors and configured command-limit trips end the session.
+//!
+//! ```no_run
+//! use haptics_device::{Device, ForceLimits, Wrench};
+//! use std::time::{Duration, Instant};
+//! # fn main() -> std::io::Result<()> {
+//! let mut device = Device::connect("/dev/parport0")?;
+//! device.sample()?; // input only; no output session yet
+//! device.guard.set_limits(ForceLimits {
+//!     force_n: 0.1,
+//!     release_after: Some(Duration::from_millis(250)),
+//!     ..Default::default()
+//! }).map_err(std::io::Error::other)?;
+//! device.enable_feedback()?; // observed zero-only arming handshake
+//! // A real application repeats this on a dedicated worker with operator,
+//! // pose, timing and travel interlocks; this example sends zero once.
+//! device.request(Wrench::default(), Instant::now())?;
+//! device.sample()?;
+//! device.close()?;
+//! # Ok(()) }
+//! ```
+//!
+//! # Coordinates and limits
+//!
+//! Main-arm kinematics use reference-model metres; forces use model newtons.
+//! All six encoder channels are preserved but direct wrist torque is unsupported.
+//! [`UNIT_DERATING`] applies once to guarded output across all applications.
+//! [`ForceLimits`] may only lower the absolute SDK ceilings. A saturation fault
+//! measures command demand, not motor current, hand force, temperature or a
+//! decoded hardware overload signal. Independent surface-temperature observations
+//! belong in session records. Software cleanup cannot cover SIGKILL or a kernel
+//! scheduling stall; no hardware watchdog behavior is claimed.
 pub mod shutdown;
 use haptics_hal::device::Sample;
 use std::time::{Duration, Instant};
@@ -7,6 +46,63 @@ use std::time::{Duration, Instant};
 pub const COMMAND_TIMEOUT: Duration = Duration::from_millis(25);
 pub const MAX_FORCE_N: f64 = 0.5;
 pub const MAX_DAC_OFFSET: i16 = 96;
+
+/// One unit-wide gain, applied exactly once by the guard to force, slew and DAC
+/// ceilings. This scales the already conservative SDK envelope, not a historical
+/// manufacturer rating. Finalise from logged motion, operator sound observations
+/// and measured motor-surface temperatures. Keep in (0, 1].
+pub const UNIT_DERATING: f64 = 1.0;
+const _: () = assert!(UNIT_DERATING > 0. && UNIT_DERATING <= 1.);
+
+/// Optional stricter application limits. Values may only lower SDK ceilings.
+/// Saturation release observes command demand, never measured physical load.
+#[derive(Clone, Copy, Debug)]
+pub struct ForceLimits {
+    pub force_n: f64,
+    pub slew_n_s: f64,
+    pub dac_counts: i16,
+    pub release_after: Option<Duration>,
+}
+impl Default for ForceLimits {
+    fn default() -> Self {
+        Self {
+            force_n: MAX_FORCE_N,
+            slew_n_s: 2.,
+            dac_counts: MAX_DAC_OFFSET,
+            release_after: None,
+        }
+    }
+}
+impl ForceLimits {
+    fn valid(self) -> bool {
+        self.force_n.is_finite()
+            && self.force_n > 0.
+            && self.force_n <= MAX_FORCE_N
+            && self.slew_n_s.is_finite()
+            && self.slew_n_s > 0.
+            && self.slew_n_s <= 2.
+            && self.dac_counts > 0
+            && self.dac_counts <= MAX_DAC_OFFSET
+            && self
+                .release_after
+                .is_none_or(|d| !d.is_zero() && d <= Duration::from_secs(1))
+    }
+}
+
+/// Latched software fault. This is not a sensor or decoded amplifier fault.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ForceFault {
+    SustainedCommandLimit,
+}
+impl ForceFault {
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::SustainedCommandLimit => {
+                "sustained command limit; output released, explicit rearming required"
+            }
+        }
+    }
+}
 
 /// World-space force and torque requested at the tool, in N and N·m.
 #[derive(Clone, Copy, Debug, Default)]
@@ -19,6 +115,7 @@ pub struct Wrench {
 #[derive(Default)]
 pub struct EncoderState {
     previous: Option<[i16; 6]>,
+    continuous_counts: [i64; 6],
     pub counts: [i16; 6],
     pub relative_counts: [i64; 6],
     pub button_pressed: bool,
@@ -28,8 +125,13 @@ impl EncoderState {
         self.counts = sample.encoder_counts();
         if let Some(previous) = self.previous {
             for (i, old) in previous.into_iter().enumerate() {
-                self.relative_counts[i] += i64::from(self.counts[i].wrapping_sub(old));
+                let delta = i64::from(self.counts[i].wrapping_sub(old));
+                self.relative_counts[i] += delta;
+                self.continuous_counts[i] += delta;
             }
+        }
+        if self.previous.is_none() {
+            self.continuous_counts = self.counts.map(i64::from);
         }
         self.previous = Some(self.counts);
         self.button_pressed = sample.stylus_button_pressed();
@@ -37,8 +139,13 @@ impl EncoderState {
     pub fn recenter(&mut self) {
         self.relative_counts = [0; 6];
     }
+    /// Unwrapped absolute counters, unaffected by relative-display recentering.
+    /// Successive samples must be less than half a counter revolution apart.
+    pub fn continuous_counts(&self) -> [i64; 6] {
+        self.continuous_counts
+    }
     pub fn position_m(&self) -> [f64; 3] {
-        position_m(self.counts)
+        position_from_counts(std::array::from_fn(|i| self.continuous_counts[i] as f64))
     }
 }
 
@@ -67,7 +174,12 @@ pub fn position_from_counts(counts: [f64; 3]) -> [f64; 3] {
 
 /// Jacobian columns in main-joint order. Force is transformed by J^T.
 pub fn jacobian(counts: [i16; 6]) -> [[f64; 3]; 3] {
-    let [a, b, c] = angles([counts[0] as f64, counts[1] as f64, counts[2] as f64]);
+    jacobian_from_counts(std::array::from_fn(|i| counts[i] as f64))
+}
+
+/// Continuous-count counterpart of [`jacobian`], sharing the pose model history.
+pub fn jacobian_from_counts(counts: [f64; 3]) -> [[f64; 3]; 3] {
+    let [a, b, c] = angles(counts);
     let l = 0.1397;
     let r = l * (b.cos() + c.sin());
     [
@@ -90,16 +202,21 @@ fn limited(v: [f64; 3], max: f64) -> [f64; 3] {
 
 /// Pure conversion; callers must apply force limits and an armed output lifecycle.
 pub fn motor_offsets(counts: [i16; 6], force: [f64; 3]) -> [i16; 3] {
-    let j = jacobian(counts);
+    raw_motor_offsets(std::array::from_fn(|i| counts[i] as f64), force).map(|x| {
+        x.round()
+            .clamp(-f64::from(MAX_DAC_OFFSET), f64::from(MAX_DAC_OFFSET)) as i16
+    })
+}
+
+/// Unclamped model demand, used only to detect command saturation. These values
+/// must never be sent directly to the transport.
+fn raw_motor_offsets(counts: [f64; 3], force: [f64; 3]) -> [f64; 3] {
+    let j = jacobian_from_counts(counts);
     [
         -825. * dot(j[0], force),
         -960. * dot(j[2], force),
         -960. * dot(j[1], force),
     ]
-    .map(|x| {
-        x.round()
-            .clamp(-f64::from(MAX_DAC_OFFSET), f64::from(MAX_DAC_OFFSET)) as i16
-    })
 }
 
 /// Software deadman, vector clamp and slew limit. Torque output remains unsupported
@@ -109,15 +226,38 @@ pub struct ForceGuard {
     armed: bool,
     request: Option<(Wrench, Instant)>,
     last_tick: Option<Instant>,
+    limits: ForceLimits,
+    overload_since: Option<Instant>,
+    /// True when the latest demand exceeded the configured force or DAC cap.
+    pub command_limited: bool,
+    /// Set until explicit disarm/rearm after a configured release trip.
+    pub fault: Option<ForceFault>,
+    /// Exact bounded offsets returned on the latest tick, before transport I/O.
+    pub applied_motor_offsets: [i16; 3],
     pub applied_force: [f64; 3],
 }
 impl ForceGuard {
+    /// Configure while disarmed. Applications cannot raise any built-in ceiling.
+    pub fn set_limits(&mut self, limits: ForceLimits) -> Result<(), &'static str> {
+        if self.armed {
+            return Err("disarm before changing output limits");
+        }
+        if !limits.valid() {
+            return Err("limits must be finite, positive and no greater than SDK ceilings");
+        }
+        self.limits = limits;
+        Ok(())
+    }
     pub fn arm(&mut self) {
         self.disarm();
         self.armed = true;
     }
     pub fn disarm(&mut self) {
-        *self = Self::default();
+        let limits = self.limits;
+        *self = Self {
+            limits,
+            ..Self::default()
+        };
     }
     pub fn request(&mut self, wrench: Wrench, time: Instant) -> Result<(), &'static str> {
         if wrench
@@ -136,9 +276,22 @@ impl ForceGuard {
         self.request = Some((wrench, time));
         Ok(())
     }
+    /// Stateless raw-counter convenience entry point. Call [`Self::tick_continuous`]
+    /// with unwrapped history for motion that can cross a signed counter boundary.
+    /// [`Device`] always uses that continuous entry point.
     pub fn tick(&mut self, now: Instant, counts: [i16; 6]) -> [i16; 3] {
+        self.tick_continuous(now, counts.map(i64::from))
+    }
+    /// Service output using the same unwrapped absolute history as device pose.
+    pub fn tick_continuous(&mut self, now: Instant, counts: [i64; 6]) -> [i16; 3] {
+        let counts = std::array::from_fn(|i| counts[i] as f64);
+        self.applied_motor_offsets = [0; 3];
         let dt = self.last_tick.and_then(|t| now.checked_duration_since(t));
         self.last_tick = Some(now);
+        if self.fault.is_some() {
+            self.applied_force = [0.; 3];
+            return [0; 3];
+        }
         let valid = self.armed
             && self.request.is_some_and(|(_, t)| {
                 now.checked_duration_since(t)
@@ -146,19 +299,47 @@ impl ForceGuard {
             });
         if !valid || dt.is_some_and(|d| d > COMMAND_TIMEOUT) {
             self.applied_force = [0.; 3];
+            self.overload_since = None;
+            self.command_limited = false;
             return [0; 3];
         }
-        let desired = limited(self.request.unwrap().0.force, MAX_FORCE_N);
+        let demand = self.request.unwrap().0.force;
+        let desired = limited(demand, self.limits.force_n).map(|x| x * UNIT_DERATING);
+        let dac_limit = (f64::from(self.limits.dac_counts) * UNIT_DERATING).floor();
+        self.command_limited = norm(demand) > self.limits.force_n + 1e-12
+            || raw_motor_offsets(counts, desired)
+                .iter()
+                .any(|x| x.abs() > dac_limit);
+        if self.command_limited {
+            let since = *self.overload_since.get_or_insert(now);
+            if self
+                .limits
+                .release_after
+                .is_some_and(|delay| now.saturating_duration_since(since) >= delay)
+            {
+                self.fault = Some(ForceFault::SustainedCommandLimit);
+                self.armed = false;
+                self.applied_force = [0.; 3];
+                return [0; 3];
+            }
+        } else {
+            self.overload_since = None;
+        }
         if desired == [0.; 3] {
             self.applied_force = [0.; 3];
             return [0; 3];
         }
         let delta = std::array::from_fn(|i| desired[i] - self.applied_force[i]);
-        let step = limited(delta, 2. * dt.unwrap_or_default().as_secs_f64());
+        let step = limited(
+            delta,
+            self.limits.slew_n_s * UNIT_DERATING * dt.unwrap_or_default().as_secs_f64(),
+        );
         for (f, d) in self.applied_force.iter_mut().zip(step) {
             *f += d;
         }
-        motor_offsets(counts, self.applied_force)
+        self.applied_motor_offsets = raw_motor_offsets(counts, self.applied_force)
+            .map(|x| x.round().clamp(-dac_limit, dac_limit) as i16);
+        self.applied_motor_offsets
     }
 }
 
@@ -170,6 +351,7 @@ pub struct Device {
     pub state: EncoderState,
     pub guard: ForceGuard,
     feedback: bool,
+    last_force_fault: Option<ForceFault>,
 }
 impl Device {
     pub fn connect(path: impl AsRef<std::path::Path>) -> std::io::Result<Self> {
@@ -178,6 +360,7 @@ impl Device {
             state: EncoderState::default(),
             guard: ForceGuard::default(),
             feedback: false,
+            last_force_fault: None,
         })
     }
     pub fn enable_feedback(&mut self) -> std::io::Result<()> {
@@ -195,29 +378,63 @@ impl Device {
     }
     pub fn request(&mut self, wrench: Wrench, time: Instant) -> std::io::Result<()> {
         if let Err(e) = self.guard.request(wrench, time) {
-            let _ = self.disable_feedback();
+            self.disable_feedback()?;
             return Err(std::io::Error::other(e));
         }
         Ok(())
     }
     pub fn sample(&mut self) -> std::io::Result<Sample> {
+        self.last_force_fault = None;
         let result = (|| {
             let s = self.reader.sample()?;
             self.state.update(s);
             if self.feedback {
-                let offsets = self.guard.tick(Instant::now(), self.state.counts);
+                let offsets = self
+                    .guard
+                    .tick_continuous(Instant::now(), self.state.continuous_counts());
+                if let Some(fault) = self.guard.fault {
+                    self.last_force_fault = Some(fault);
+                    return Err(std::io::Error::other(fault.message()));
+                }
                 self.reader.write_motor_offsets(offsets)?;
             }
             Ok(s)
         })();
         if result.is_err() {
-            let _ = self.disable_feedback();
+            let shutdown = self.disable_feedback();
+            finish_failed_sample(result, shutdown, &mut self.last_force_fault)
+        } else {
+            result
         }
-        result
+    }
+    /// Classify a failed sample before the next sample. A command-limit release
+    /// has ended output but leaves a healthy input connection usable. An I/O
+    /// failure returns `None` and requires closing/reconnecting. Consumption
+    /// prevents a later transport fault being mistaken for an old force trip.
+    pub fn take_force_fault(&mut self) -> Option<ForceFault> {
+        self.last_force_fault.take()
     }
     pub fn close(mut self) -> std::io::Result<()> {
         self.disable_feedback()?;
         self.reader.close()
+    }
+}
+
+// A failed neutral/shutdown transaction outranks a recoverable command trip.
+fn finish_failed_sample<T>(
+    result: std::io::Result<T>,
+    shutdown: std::io::Result<()>,
+    fault: &mut Option<ForceFault>,
+) -> std::io::Result<T> {
+    match shutdown {
+        Ok(()) => result,
+        Err(error) => {
+            *fault = None;
+            Err(std::io::Error::new(
+                error.kind(),
+                format!("output shutdown failed: {error}"),
+            ))
+        }
     }
 }
 
@@ -262,9 +479,67 @@ mod tests {
         s.update(packet([32767; 6]));
         s.update(packet([-32768; 6]));
         assert_eq!(s.relative_counts, [1; 6]);
+        assert_eq!(s.continuous_counts(), [32768; 6]);
+        let before = s.position_m();
         s.recenter();
+        assert_eq!(s.position_m(), before);
         s.update(packet([-32767; 6]));
         assert_eq!(s.relative_counts, [1; 6]);
+        assert_eq!(s.continuous_counts(), [32769; 6]);
+        for (a, b) in before.into_iter().zip(s.position_m()) {
+            assert!((a - b).abs() < 0.0002);
+        }
+        let j0 = jacobian_from_counts([32767.; 3]);
+        let j1 = jacobian_from_counts([32768.; 3]);
+        for (a, b) in j0.into_iter().flatten().zip(j1.into_iter().flatten()) {
+            assert!((a - b).abs() < 0.0002);
+        }
+    }
+
+    #[test]
+    fn device_force_transform_stays_continuous_at_signed_rollover() {
+        let t = Instant::now();
+        let mut guard = ForceGuard::default();
+        guard.arm();
+        let wrench = Wrench {
+            force: [0.3, 0.2, 0.1],
+            ..Default::default()
+        };
+        let mut before = [0; 3];
+        for i in 0..=500 {
+            let now = t + Duration::from_millis(i);
+            guard.request(wrench, now).unwrap();
+            before = guard.tick_continuous(now, [32767; 6]);
+        }
+        let now = t + Duration::from_millis(501);
+        guard.request(wrench, now).unwrap();
+        let after = guard.tick_continuous(now, [32768; 6]);
+        for (a, b) in before.into_iter().zip(after) {
+            assert!((a - b).abs() <= 1);
+        }
+        assert_ne!(
+            after,
+            motor_offsets([-32768; 6], wrench.force),
+            "fixture must distinguish wrapped from continuous transforms"
+        );
+    }
+
+    #[test]
+    fn shutdown_failure_overrides_recoverable_force_trip() {
+        let mut fault = Some(ForceFault::SustainedCommandLimit);
+        let result: std::io::Result<()> = Err(std::io::Error::other("command trip"));
+        let error = finish_failed_sample(
+            result,
+            Err(std::io::Error::from(std::io::ErrorKind::TimedOut)),
+            &mut fault,
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+        assert_eq!(fault, None);
+        let mut fault = Some(ForceFault::SustainedCommandLimit);
+        let result: std::io::Result<()> = Err(std::io::Error::other("command trip"));
+        assert!(finish_failed_sample(result, Ok(()), &mut fault).is_err());
+        assert_eq!(fault, Some(ForceFault::SustainedCommandLimit));
     }
     #[test]
     fn force_requires_arm_and_expires_to_zero() {
@@ -305,5 +580,114 @@ mod tests {
             t,
         )
         .unwrap_err();
+    }
+
+    #[test]
+    fn stricter_limits_release_sustained_demand_and_latch_until_rearm() {
+        let mut g = ForceGuard::default();
+        let limits = ForceLimits {
+            force_n: 0.1,
+            release_after: Some(Duration::from_millis(250)),
+            ..Default::default()
+        };
+        g.set_limits(limits).unwrap();
+        g.arm();
+        assert!(g.set_limits(limits).is_err());
+        let t = Instant::now();
+        for i in 0..=250 {
+            let now = t + Duration::from_millis(i);
+            g.request(
+                Wrench {
+                    force: [0., 1., 0.],
+                    ..Default::default()
+                },
+                now,
+            )
+            .unwrap();
+            let offsets = g.tick(now, [0; 6]);
+            assert!(norm(g.applied_force) <= 0.1 + 1e-12);
+            if i == 250 {
+                assert_eq!(offsets, [0; 3]);
+                assert_eq!(g.fault, Some(ForceFault::SustainedCommandLimit));
+            }
+        }
+        let now = t + Duration::from_millis(251);
+        g.request(
+            Wrench {
+                force: [0., 0.05, 0.],
+                ..Default::default()
+            },
+            now,
+        )
+        .unwrap();
+        assert_eq!(g.tick(now, [0; 6]), [0; 3]);
+        g.arm();
+        assert!(g.fault.is_none());
+        g.request(
+            Wrench {
+                force: [0., 1., 0.],
+                ..Default::default()
+            },
+            now,
+        )
+        .unwrap();
+        g.tick(now, [0; 6]);
+        g.request(
+            Wrench {
+                force: [0., 1., 0.],
+                ..Default::default()
+            },
+            now + Duration::from_millis(1),
+        )
+        .unwrap();
+        g.tick(now + Duration::from_millis(1), [0; 6]);
+        assert!(g.applied_force[1] > 0. && g.applied_force[1] < 0.1);
+    }
+
+    #[test]
+    fn saturation_timer_resets_and_invalid_limits_cannot_raise_sdk_ceiling() {
+        let mut g = ForceGuard::default();
+        for limits in [
+            ForceLimits {
+                force_n: f64::NAN,
+                ..Default::default()
+            },
+            ForceLimits {
+                force_n: 0.6,
+                ..Default::default()
+            },
+            ForceLimits {
+                dac_counts: 97,
+                ..Default::default()
+            },
+            ForceLimits {
+                slew_n_s: 3.,
+                ..Default::default()
+            },
+        ] {
+            assert!(g.set_limits(limits).is_err());
+        }
+        g.set_limits(ForceLimits {
+            force_n: 0.1,
+            release_after: Some(Duration::from_millis(100)),
+            ..Default::default()
+        })
+        .unwrap();
+        g.arm();
+        let t = Instant::now();
+        for i in 0..300 {
+            let now = t + Duration::from_millis(i);
+            let force = if i % 75 == 0 { [0.; 3] } else { [0., 1., 0.] };
+            g.request(
+                Wrench {
+                    force,
+                    ..Default::default()
+                },
+                now,
+            )
+            .unwrap();
+            g.tick(now, [0; 6]);
+            assert!(g.fault.is_none());
+        }
     }
 }
