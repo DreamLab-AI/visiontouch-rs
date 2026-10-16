@@ -172,3 +172,30 @@ The explicitly observed still start and manually observed zero are included as
 support observations even if the sweep's spatial deduplication/storage cap did
 not retain a cell there. Export the resulting support observation count. These
 endpoint observations do not fill any intervening unknown interval.
+
+## Live manual approach teaching
+
+Replace the initial blanket sweep-output lock only after a fresh motor-off,
+out-and-back teaching trace on the current connection. The selected zero and
+start must be distinct (5–500 model mm). Record a continuous hand-guided approach
+to zero, a still dwell, return to start and another still dwell. Require every
+sample interval in (0,25 ms], raw model speed <=60 mm/s, perpendicular/endpoint
+overshoot <=2 mm, each dwell >=0.3 s, total duration <=180 s, and a live UI
+heartbeat. Pen button, Stop, connection/reference changes, input faults and
+calibration edits invalidate an unfinished trace. Preserve time-stamped taught
+points, with bounded 0.5 mm spatial retention; all samples still undergo checks.
+
+After completion, analytic sample support must cover the entire straight route.
+Keep confirmation only in worker memory, with a five-minute expiry. Store trace
+and policy as evidence, never reloadable arming authority. A zero-move attempt
+must start still within 0.75 mm of its taught start and use the exact taught zero.
+Other held demos require the same fresh confirmation and current membership in
+the sample-supported region. Every active sample must remain supported; leaving
+it releases output. Apply existing hold/UI/velocity/transport/stall guards and a
+lower 0.1 model N maximum for swept-map pilot attempts. Use a <=20 mm model effect
+radius. No unit is powered or driven during offline implementation/testing.
+
+Manual tracing is evidence of hand-guided motion, not validation of force
+magnitude, thermal safety or hard real-time control. Actual controlled resistance
+and overload tests remain necessary with the owner present. A stored or synthetic
+trace can never create live motor authorization.
