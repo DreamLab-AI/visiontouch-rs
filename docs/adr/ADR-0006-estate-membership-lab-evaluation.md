@@ -3,8 +3,8 @@ id: ADR-0006
 title: Hold this repository in the VisionFlow research estate as a lab evaluation with no economic use
 date: 2026-10-17
 decision_status: accepted
-implementation_status: partial
-activation_status: staged
+implementation_status: complete
+activation_status: live
 supersedes: []
 superseded_by: []
 verified_commit: e6f9d018f1ee88bd4db315937c9d66a3b95d1818
@@ -51,7 +51,7 @@ ADR in both ledgers.
 
 ## Verification
 
-`AGENTS.md` and `README.md` state the posture; VisionFlow working tree carries
-ADR-2017, the roster row, the repository-map row and the website card (verified
-by reading those files on 2026-10-17; the VisionFlow commit is recorded when it
-lands).
+`AGENTS.md` and `README.md` state the posture. The VisionFlow canon carries
+ADR-2017, the roster row, the repository-map row, the website card and the
+diagrams area `docs/diagrams/visiontouch-rs` (VT-01 to VT-07) at VisionFlow
+commit d29c2ac8117b42d564e1f18e8358916c0b1a12fe.
