@@ -1,0 +1,75 @@
+{
+  "schema": 2,
+  "kind": "haptics-verification-attempt",
+  "session_id": "f646bca8-4f14-468b-a103-7daa7cc389d8",
+  "attempt_id": 4,
+  "step": "liveness",
+  "params": {
+    "channel": 1,
+    "counts": 80,
+    "csv_row_every": 1,
+    "duration_s": 2.0,
+    "hz": 3.0
+  },
+  "started_utc": "2026-10-17T11:11:59Z",
+  "duration_s": 0.032852665,
+  "software": {
+    "git_commit": "3875bfd994d73c068a8dafa6ea0ec6f012063e1e",
+    "sdk": {
+      "max_force_n": 2.0,
+      "max_dac": 300,
+      "slew_n_s": 100.0,
+      "timeout_ms": 25,
+      "unit_derating": 1.0
+    }
+  },
+  "limits": {
+    "force_n": 0.5,
+    "slew_n_s": 100.0,
+    "dac_counts": 96
+  },
+  "registration": null,
+  "stop": {
+    "reason": "speed",
+    "detail": "phase square_hi at 0.03 s, position [-0.0583710391373476, 0.07081671563248151, -0.029935808775358397]"
+  },
+  "telemetry_summary": {
+    "samples": 58,
+    "max_interval_ms": 15.768699,
+    "stale_ticks": 0,
+    "force_capped_ticks": 0,
+    "dac_capped_ticks": 0,
+    "max_abs_offsets": [
+      0,
+      80,
+      0
+    ]
+  },
+  "auto": {
+    "lockin_amplitude_counts": 0.0006695644519096184,
+    "noise_counts": 0.5,
+    "lockin_encoder": 1,
+    "lockin_pass": false,
+    "sign_agrees": null,
+    "liftoff_force_n": null,
+    "k_marginal_n_mm": null,
+    "oscillation": false
+  },
+  "operator": {
+    "readings": [],
+    "felt": null,
+    "heard": null,
+    "note": ""
+  },
+  "verdict": {
+    "kind": "auto-fail",
+    "pass": false,
+    "rule": "pass: m >= 0.8c-0.05; over: m > 1.2c+0.05 or oscillation; else under",
+    "unlocks": []
+  },
+  "csv": {
+    "file": "0004-liveness.csv",
+    "sha256": "10b6ce53f60136b7159b9cfbf08eec542f7f4cf095014a0a095832a658c64270"
+  },
+  "claim": "Commands are model values; delivered force only from operator readings"
+}
