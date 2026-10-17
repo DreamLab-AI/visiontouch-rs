@@ -118,7 +118,7 @@ impl App {
 
 fn window_conf() -> Conf {
     Conf {
-        window_title: "Mass Lab — 3D Physics".into(),
+        window_title: "Mass Lab: 3D Physics".into(),
         window_width: 1280,
         window_height: 820,
         high_dpi: true,

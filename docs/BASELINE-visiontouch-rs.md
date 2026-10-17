@@ -46,7 +46,7 @@ artefact enters the tree. Spec precedes code; commit order is the evidence.
 
 ## 4. Invariants
 
-Each invariant names where it is enforced. A change that weakens one is an ADR.
+Each invariant names where it is enforced (invariants 2, 3 and 12 are process rules, enforced by review and PROVENANCE ordering, with no mechanical check). A change that weakens one is an ADR.
 
 1. **No vendor artefacts tracked.** `.gitignore` excludes `/vendor-original/`,
    `/disasm/`, binaries and installers; `scripts/quality-gate.sh` fails if any
@@ -61,7 +61,7 @@ Each invariant names where it is enforced. A change that weakens one is an ADR.
    (ADR-0002)
 5. **SDK ceilings derive from the DAC bound and cannot be raised by callers.**
    `MAX_FORCE_N` 2.0, `MAX_DAC_OFFSET` = transport clamp, `MAX_SLEW_N_S` 100,
-   `COMMAND_TIMEOUT` 25 ms; `ForceLimits::set_limits` refuses anything higher
+   `COMMAND_TIMEOUT` 25 ms; `ForceGuard::set_limits` refuses anything higher
    and refuses changes while armed. (ADR-0002)
 6. **Defaults are the proven envelope.** `ForceLimits::default()` is 0.5 N and
    96 counts, the envelope armed live in P-0030; `CONTINUOUS_FORCE_N` 1.0 caps
@@ -85,8 +85,9 @@ Each invariant names where it is enforced. A change that weakens one is an ADR.
     from an attended session. (ADR-0003)
 13. **CI never opens hardware.** `scripts/quality-gate.sh` and
     `.github/workflows/ci.yml` touch no device node. (ADR-0005)
-14. **Public APIs are documented.** Every crate enables `missing_docs`; strict
-    rustdoc is in the gate. (ADR-0005)
+14. **Public APIs are documented.** Every library crate (`hal`, `device`,
+    `effects`) enables `missing_docs`; apps and tools are covered by strict
+    rustdoc only, which is in the gate. (ADR-0005)
 15. **Posture.** Private lab evaluation, no economic use; any intent to
     publish, distribute or demonstrate externally re-opens ADR-0001's legal
     review first. (ADR-0006)

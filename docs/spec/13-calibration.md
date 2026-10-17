@@ -10,7 +10,7 @@ calibration (P-0034, P-0040 to P-0048). Force verification is specified in
 Registration binds the model frame to the arm at the reset pose: near arm horizontal and
 square to the base front, far arm plumb (P-0049 to P-0051). The owner places the arm,
 holds still, and the host captures all six continuous counters after 250 ms with at most
-0.5 mm of model variation per axis. Registered counts are continuous minus the capture;
+a 0.5 mm extent (bounding-box diagonal) of model variation. Registered counts are continuous minus the capture;
 position and Jacobian are evaluated from them for the three position channels only.
 Cartesian force is refused while unregistered, and reconnection clears registration.
 Checks (stillness, return-to-reset repeatability within 2 mm, gravity-drop sign, ruler

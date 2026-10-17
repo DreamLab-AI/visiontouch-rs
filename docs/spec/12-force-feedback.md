@@ -94,7 +94,10 @@ remains to be established.
 ## Mass Lab servo-rate coupling
 
 Design: P-0064. Mass Lab hands its worker a `Coupling` descriptor in registered model
-metres: proxy position, proxy velocity, stiffness, damping and the instant it was issued.
+metres: proxy position, proxy velocity, the scene box (`bounds_m`), stiffness, damping and the
+instant it was issued. The pen is clamped into the scene box before the spring is
+evaluated (on a clamped axis its velocity is taken as the proxy's), so a pen outside the
+scene feels no force the scene did not ask for.
 On every servo tick the worker reads the sample, computes F = K (proxy - p) - B (v - v_proxy)
 from that sample, and requests it, so output no longer depends on the UI frame rate (F3).
 
@@ -106,8 +109,8 @@ An older descriptor produces zero and the reason "force muted: scene stalled", s
 stall cannot tether the pen to a frozen proxy. Other mute reasons are paused simulation,
 time scale not 1.00x, unregistered, and feedback off.
 
-Mass Lab uses `ForceLimits::default` (0.5 N, 96 counts), a fixed stiffness of 150 model
-N/m and no measured K, and may not raise limits. A 2 kg block then produces about 0.45 N
+Mass Lab uses `ForceLimits::default` (0.5 N, 96 counts), a default stiffness of 150 model
+N/m (slider 20 to 1500, bounded in practice by the 0.5 N, 96-count default) and no measured K, and may not raise limits. A 2 kg block then produces about 0.45 N
 through proxy lag. The old 0.02 scene-force scale is removed.
 
 ## Simulation (application side)

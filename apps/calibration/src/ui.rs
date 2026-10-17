@@ -290,7 +290,7 @@ fn left_panel(app: &mut App, ctx: &egui::Context) {
                                     .iter()
                                     .filter_map(|s| {
                                         app.snapshot.session.rungs[r.index()][a.index()][s.index()]
-                                            .map(|v| format!("{}{}", s.name(), match v { Verdict::Pass => "P", Verdict::Over => "O", Verdict::Under => "U" }))
+                                            .map(|v| format!("{}{}", s.name(), match v { Verdict::Pass => "P", Verdict::Over => "O", Verdict::Under => "U", Verdict::None => "-" }))
                                     })
                                     .collect();
                                 ui.label(RichText::new(if cell.is_empty() { "-".into() } else { cell.join(" ") }).monospace());

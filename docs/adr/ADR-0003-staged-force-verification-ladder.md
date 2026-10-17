@@ -38,11 +38,16 @@ proven 96-count envelope) runs first and needs no registration. Sign pulses,
 0.1 to 0.5 N ladder rungs and effects at 0.5 N require liveness, registration and
 the sign checks. The 1.0 N rung requires the 0.5 N rung on all three axes; the
 2.0 N rung, the lift test to 1.5 N and the wall ramp require the 1.0 N rung on all
-three axes; effects never exceed 1.0 N. A rung passes only if the operator's
-reading lies within [0.8c - 0.05, 1.2c + 0.05] N of the command c with no
-oscillation; under-delivery is recorded and does not unlock; over-delivery on any
-rung locks every force step for the rest of the connection. Only a completed
-dwell can be scored; an attempt stopped early for any reason grants nothing. Anything above 1.0 N exists only
+three axes; effects never exceed 1.0 N. A rung is scored from
+the operator's reading against the command c: Pass within [0.8c - 0.05, 1.2c + 0.05] N
+with no oscillation; Over above that band or on oscillation; Under below the band
+with at least 0.05 N read; None when a completed dwell reads below 0.05 N absolute
+and the band is missed (nothing delivered). Pass and Under clear the rung: an Under
+is recorded with its slope and does not block, because the DAC bound delivers less
+rather than more. None neither clears the rung nor locks. Over on any rung, axis or
+sign locks every force step for the whole connection: re-registration does not
+clear it, only a reconnect does. Only a completed dwell can be scored; an attempt
+stopped early for any reason grants nothing. Anything above 1.0 N exists only
 inside fixed-dwell steps of at most 10 s. No unlock persists across connections or
 restarts; saved evidence never arms output. Readings are typed only while output
 is off and are keyed to the attempt id.
@@ -51,8 +56,8 @@ is off and are keyed to the attempt id.
 
 The first attended session answers the liveness question in minutes and produces
 the first delivered-force numbers (gauge slope per axis, lift gain) that can
-replace the inferred gains and set `UNIT_DERATING` by a later ADR. The demos and
-Mass Lab only ever run inside the envelope a rung has validated. The owner must
+replace the inferred gains and set `UNIT_DERATING` by a later ADR. Mass Lab runs at the P-0030 default (0.5 N, 96 counts) and never above
+`CONTINUOUS_FORCE_N`; only the Studio's effects are ladder-gated. The owner must
 own a gauge or 1 g scale, 50 g and 100 g masses, a ruler and a set square. The
 workflow is slower than "hold Space and feel", by design. Thermal testing is a
 separate Confirm-driven attempt class because a 600 s hold cannot live inside a

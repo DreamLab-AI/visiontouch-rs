@@ -66,16 +66,16 @@ check registration with a ruler and a gravity drop, then verify force output by
 stages, each a held attempt that writes an evidence record: actuator liveness,
 per-axis sign pulses, a static ladder against a gauge or scale (0.1 to 2.0 N),
 a differential lift test with known masses, a virtual-wall stiffness ramp and a
-thermal hold. Each stage unlocks the next only after the operator's readings pass
-on the current connection. Demos and Mass Lab run only inside the envelope a stage
-has validated. The owner's runbook is the appendix of
+thermal hold. Each stage unlocks the next only after the operator's readings clear
+the rung on the current connection. Mass Lab runs at the P-0030 default (0.5 N, 96 counts) and never above
+`CONTINUOUS_FORCE_N`; only the Studio's effects are ladder-gated. The owner's runbook is the appendix of
 `docs/spec/14-force-calibration.md`.
 
 ## Safety
 
 The device applies force to a hand. Motor output is explicitly armed per attempt,
 expires to zero after 25 ms without a fresh request, and is clamped at the
-transport to 300 counts of a 2047-centred word (about 15% of range). Applications
+transport to 300 counts of a 2047-centred word (about 15% of the half-span). Applications
 inherit a 0.5 N / 96-count default. Software cannot cover a kernel stall or a
 killed process; keep the amplifier power switch within reach and nothing in the
 workspace during powered steps.

@@ -6,10 +6,10 @@
 
 SensAble's naming shifted over ten years of production:
 
-- **PHANToM 1.0 (1993–96)** — Massie & Salisbury's MIT device, 3-DOF force, stylus/thimble end-effector ([Massie & Salisbury 1994, PDF](https://alliance.seas.upenn.edu/~medesign/wiki/uploads/Courses/Massie94-DSC-Phantom.pdf)).
-- **PHANTOM Premium 1.0 / 1.0A / 1.5 / 1.5HF / 3.0** — the commercial line; "Premium" was added once the cheaper Desktop appeared. The device guide states the unit "connects to the PC via the parallel port (EPP) interface" ([Premium 1.0/1.5/HF Device Guide, 3D Systems S3](https://s3.amazonaws.com/dl.3dsystems.com/binaries/Sensable/UserGuide/Premium1.0_1.5_HF_Device_guide.pdf); [Dentsable Premium 1.0 page](https://dentsable.com/phantom-premium-1-0.htm)).
-- **PHANTOM Desktop (~1998–2000 on)** — compact, lower-cost; "a simple parallel port interface", IEEE-1284 EPP cable with a ferrite bead ([Desktop Device Guide, 3D Systems S3](https://s3.amazonaws.com/dl.3dsystems.com/binaries/Sensable/UserGuide/Desktop_Device_Guide.pdf); [Dentsable Desktop page](https://dentsable.com/haptic-phantom-desktop.htm)).
-- **"Pro" / "1.0 Pro"** — not found as an official SensAble model name **[UNVERIFIED]**. Possibly a GHOST SDK edition sticker or an informal lab label. Confirm from the base plate.
+- **PHANToM 1.0 (1993–96)**: Massie & Salisbury's MIT device, 3-DOF force, stylus/thimble end-effector ([Massie & Salisbury 1994, PDF](https://alliance.seas.upenn.edu/~medesign/wiki/uploads/Courses/Massie94-DSC-Phantom.pdf)).
+- **PHANTOM Premium 1.0 / 1.0A / 1.5 / 1.5HF / 3.0**: the commercial line; "Premium" was added once the cheaper Desktop appeared. The device guide states the unit "connects to the PC via the parallel port (EPP) interface" ([Premium 1.0/1.5/HF Device Guide, 3D Systems S3](https://s3.amazonaws.com/dl.3dsystems.com/binaries/Sensable/UserGuide/Premium1.0_1.5_HF_Device_guide.pdf); [Dentsable Premium 1.0 page](https://dentsable.com/phantom-premium-1-0.htm)).
+- **PHANTOM Desktop (~1998–2000 on)**: compact, lower-cost; "a simple parallel port interface", IEEE-1284 EPP cable with a ferrite bead ([Desktop Device Guide, 3D Systems S3](https://s3.amazonaws.com/dl.3dsystems.com/binaries/Sensable/UserGuide/Desktop_Device_Guide.pdf); [Dentsable Desktop page](https://dentsable.com/haptic-phantom-desktop.htm)).
+- **"Pro" / "1.0 Pro"**: not found as an official SensAble model name **[UNVERIFIED]**. Possibly a GHOST SDK edition sticker or an informal lab label. Confirm from the base plate.
 
 Desktop vs Premium 1.0: the Desktop is smaller and lighter with a shorter reach; the Premium bolts to a desk mount and is bulkier. Both use the same DB25 EPP cable, so the label is the discriminator, not the cable.
 
@@ -25,7 +25,7 @@ An external **amplifier box** exists in the family (DB25 in, motor-power cable o
 
 ## 3. The Windows stack: GHOST SDK + Phantom Device Driver
 
-- **GHOST** (General Haptics Open Software Toolkit): C++ scene-graph SDK over a low-level driver. GHOST 4 (Aug 2002) added Red Hat Linux and Windows XP; "available for Windows NT, 2000, XP, and Red Hat Linux" ([HPCWire](https://www.hpcwire.com/2002/08/16/sensable-technologies-announces-ghost-version-4/) — 403'd on fetch; text from search snippet **[reconfirm]**). So the Win95/98/NT4 support the owner remembers is GHOST 2.x/3.x, mid-to-late 1990s. Wayback Machine for sensable.com 1998–2001 is the place to pin this down.
+- **GHOST** (General Haptics Open Software Toolkit): C++ scene-graph SDK over a low-level driver. GHOST 4 (Aug 2002) added Red Hat Linux and Windows XP; "available for Windows NT, 2000, XP, and Red Hat Linux" ([HPCWire](https://www.hpcwire.com/2002/08/16/sensable-technologies-announces-ghost-version-4/): 403'd on fetch; text from search snippet **[reconfirm]**). So the Win95/98/NT4 support the owner remembers is GHOST 2.x/3.x, mid-to-late 1990s. Wayback Machine for sensable.com 1998–2001 is the place to pin this down.
 - GHOST 4 added **`gstDeviceIO`**: raw encoder counts, direct force commands, motor temperatures. A public description of the lowest documented software layer.
 - Utilities: **"PHANTOM Configuration"** (port/IRQ/device type, calibration store) and **"PHANTOM Test"**; a 3D Systems KB says to re-run both to regenerate deleted config/calibration files ([3D Systems support](https://support.3dsystems.com/s/article/Haptic-Device-Drivers)) **[page rendered as JS shell; from snippet]**.
 - File names `phantom.sys`, `phantomio.vxd`, `ghost*.dll` are plausible by architecture but **[UNVERIFIED]**. A surviving install directory or CD would settle it.

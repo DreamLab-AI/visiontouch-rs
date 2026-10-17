@@ -18,7 +18,7 @@ Rules that apply to every step:
 1. A value labelled force, torque or newtons in software or logs is a model command.
    Delivered force exists only as an operator gauge or mass reading and is promoted
    only through an OWNER or OBSERVE provenance row (AGENTS.md rule 4).
-2. Each higher force or content class unlocks only after the lower rung passed on the
+2. Each higher force or content class unlocks only after the lower rung cleared on the
    same connection (section 7, P-0063). No unlock survives a reconnect.
 3. No step opens hardware from CI. The procedure runs on the owner's host (AGENTS.md
    rule 6); the agent prepares the protocol and evidence template.
@@ -52,7 +52,7 @@ All numbers are code constants in `crates/device/src/lib.rs` and
 | `MAX_DAC_OFFSET` | 300 counts | Equals the HAL transport clamp `MAX_MOTOR_OFFSET`; 14.7 percent of the 2047 half-span | P-0061 |
 | `DEFAULT_DAC_OFFSET` | 96 counts | Default per-channel limit; the P-0030 envelope | P-0030, P-0061 |
 | `MAX_CHANNEL_TEST_OFFSET` | 96 counts | Raw channel demand never leaves the P-0030 envelope | P-0061 |
-| `MAX_SLEW_N_S` | 100 N/s | 0.24 N per 2.4 ms tick; 0 to 2 N in 8 ticks. Stiffest content (1.0 N/mm) at a brisk 0.1 m/s must not bind | P-0037, P-0061 |
+| `MAX_SLEW_N_S` | 100 N/s | 0.24 N per 2.4 ms tick; 0 to 2 N in 9 ticks. Stiffest content (1.0 N/mm) at a brisk 0.1 m/s must not bind | P-0037, P-0061 |
 | `COMMAND_TIMEOUT` | 25 ms | A request older than this yields zero; about ten ticks | P-0037, P-0061 |
 | `UNIT_DERATING` | 1.0 | Unchanged; a measured gauge slope may lower it by ADR | ADR-0002 |
 
@@ -101,7 +101,7 @@ and holds still. Registering at the reset pose rather than a bottom rest is desi
 choice P-0062 (ADR-0004).
 
 **Capture.** Registration is accepted only when the reference-model position varies by
-at most 0.5 mm on each axis over 250 ms. The captured continuous counters become the
+within a 0.5 mm extent (bounding-box diagonal) over 250 ms. The captured continuous counters become the
 origin; all later positions are registered counts.
 
 **Why checks are needed.** A hand-set reset plus nominal kinematics gives 10 to 60 mm of
@@ -110,7 +110,7 @@ check is true by construction and is not a test. The discriminating checks are:
 
 | Check | Procedure | Acceptance | Failure handling |
 |---|---|---|---|
-| Stillness | Counters quiet at capture | 250 ms, 0.5 mm per axis | Capture refused |
+| Stillness | Counters quiet at capture | 250 ms, within a 0.5 mm extent (bounding-box diagonal) | Capture refused |
 | Repeatability | Move away, return to reset, compare | Within 2 mm | Redo registration |
 | Gravity-drop sign | Arm the test in the Studio, then release the pen from mid height onto the palm about 20 mm below | Model position moves in -Y; a fail is sticky until re-registration | Stop; record an OBSERVE row; fix the model, never an ad hoc flip |
 | Ruler scale | Mark start, slide 50 mm along a square on each of X, Y, Z, mark end, enter millimetres | Model/ruler ratio 0.8 to 1.25 | Recorded and warned, not a stop (the ladder measures force directly) |
@@ -156,13 +156,15 @@ with the pen held lightly near the reset pose, phone recording 10 cm from the dr
 housing. Limits: raw channel demand, at most 96 counts (P-0030). It needs no
 registration and no Jacobian, and it is the go/no-go for the session because amplifier
 enable is unproven (force-audit F6, P-0060). Interlocks: section 5 with 15 mm excursion
-and a bound just above the 2 s plan per channel.
+and a 4 s bound per channel (the 2 s plan plus margin).
 
-Auto-scoring: each channel is cross-correlated against all three encoders (a 3 by 3
-matrix), because the channel-to-encoder map from P-0013 is unproven. A channel passes if
-any encoder's lock-in amplitude at 3 Hz exceeds five times its no-drive noise. Operator
-entries: felt and heard per channel. Acceptance: a channel passes on felt, heard or
-lock-in. Failure handling: if no channel passes, end the session; the next session
+Auto-scoring: each channel is cross-correlated against all three encoders, because the
+channel-to-encoder map from P-0013 is unproven; only the best encoder is recorded
+(`auto.lockin_encoder`). The noise estimate comes from the off-frequency bins of the
+driven record itself. A channel passes if that encoder's lock-in amplitude at 3 Hz
+exceeds five times the noise. Operator entries: felt and heard per channel; they count
+only on a completed drive, never on an aborted one. Acceptance: a channel passes on
+felt, heard or lock-in. Failure handling: if no channel passes, end the session; the next session
 captures input-only packets with feedback off and on and compares bytes 12, 13 and 15
 (F6.1), then runs the vendor black-box live check (F6.3). If one or two channels fail,
 stop and report which.
@@ -196,9 +198,10 @@ Verdict, with m the measured value and c the commanded value (P-0063):
 | Verdict | Rule | Effect |
 |---|---|---|
 | Over | m > 1.2 c + 0.05 N, or oscillation | Locks every force step for the rest of the connection; the Studio refuses each Start naming the rung and axis |
-| Aborted | Attempt stopped before the dwell completed, for any reason | Recorded; no verdict; no unlock |
+| Aborted | Attempt stopped before the plan completed (the whole 4 s), for any reason | Recorded; no verdict; no unlock |
 | Pass | m at least 0.8 c - 0.05 N | Counts towards the unlock |
-| Under | otherwise | Recorded with the slope; does not block, because the DAC bound delivers less rather than more |
+| Under | below the pass band, with m at least 0.05 N | Recorded with the slope; clears the rung and does not block, because the DAC bound delivers less rather than more |
+| None | below the pass band and m below 0.05 N absolute, on a completed dwell | Recorded as "nothing delivered"; does not clear the rung and does not lock |
 
 Under is not a failure of safety: a slope near 0.55 is plausible given the factor-of-two
 gain uncertainty. The recorded slope is the real counts-per-newton constant and is the
@@ -215,12 +218,16 @@ unlocked cap (1.5 N at most, so the 10 s budget above 1.0 N is never reached), a
 automatically (rise above 2 mm). Repeat with a 50 g mass on a light hook, then 100 g.
 With F_0 the lift-off force bare and F_m with mass m:
 
-    gain = m g / (F_m - F_0)
+    g = m g / (F_m - F_0)
 
-The ratio cancels friction to first order and needs no gauge. F_0 is recorded as the
+The ratio cancels friction to first order and needs no gauge. Units matter when
+comparing: the ladder slope is s = m / c (delivered per commanded), and F_m - F_0 is
+commanded while m g is delivered, so the lift gain g is also delivered per commanded.
+Expect g close to s. (Its reciprocal, 1 / g, is commanded per delivered newton.) F_0 is recorded as the
 first gravity data point. Stop if the arm walks sideways more than 25 mm or rises
-quickly. Operator entries: the masses. Acceptance: reported, not gated. The gain is
-compared with the ladder slope for consistency.
+quickly. Operator entries: the masses. Acceptance: reported, not gated. The gain g is
+compared with the ladder slope s for consistency; they should agree to within the
+scatter of the readings.
 
 ### 6.7 Thermal hold
 
@@ -258,7 +265,7 @@ computed from the interlock velocity, which is displacement over a 9.6 ms window
 (four nominal ticks; one count per 2.4 ms is about 10 mm/s raw) and so does not
 depend on the loop cadence (P-0065), or on operator release. The structural resonance of the family is near
 125 Hz (P-0054), above the detector band by design. Operator entries: the step at which a sustained buzz began. Result: K_marginal is
-the last stiffness before the stop. Unlocked only after the 1.0 N rung passes on X, Y
+the last stiffness before the stop. Unlocked only after the 1.0 N rung clears on X, Y
 and Z.
 
 ## 7. Unlock ladder
@@ -269,14 +276,14 @@ Each row unlocks only on conditions met in this session and on this connection (
 |---|---|---|
 | Channel test | Connected | Channels only, at most 96 counts |
 | Sign pulses | Liveness pass on all three channels; registration; gravity-drop and ruler sign | Force 0.5 N, DAC 96, slew 100 N/s |
-| 0.1 to 0.5 N rungs; effects at 0.5 N | Sign pulses pass on X, Y and Z | Force 0.5 N, DAC 96, slew 100 N/s |
-| 1.0 N rung; lift test to 1.0 N | 0.5 N rung passed on X, Y and Z (one sign each minimum) | Force 1.0 N, DAC 300 |
-| 2.0 N rung; lift test to 1.5 N | 1.0 N rung passed on X, Y and Z | Force 2.0 N, DAC 300 |
-| Effects up to 1.0 N; wall ramp; thermal | 1.0 N rung passed on X, Y and Z | Force at most 1.0 N, DAC 300 |
+| 0.1 to 0.5 N rungs; lift test to 0.5 N; effects at 0.5 N | Sign pulses pass on X, Y and Z | Force 0.5 N, DAC 96, slew 100 N/s |
+| 1.0 N rung; lift test to 1.0 N | 0.5 N rung cleared (Pass or Under, never None) on X, Y and Z (one sign each minimum) | Force 1.0 N, DAC 300 |
+| 2.0 N rung; lift test to 1.5 N | 1.0 N rung cleared on X, Y and Z | Force 2.0 N, DAC 300 |
+| Effects up to 1.0 N; wall ramp; thermal | 1.0 N rung cleared on X, Y and Z | Force at most 1.0 N, DAC 300 |
 
 Content that has no fixed dwell (effects, demos, Mass Lab) never exceeds
 `CONTINUOUS_FORCE_N`. Only Calibration Studio may construct limits above the default,
-and only inside fixed-dwell steps after the lower rung passed. After a committed OWNER
+and only inside fixed-dwell steps after the lower rung cleared. After a committed OWNER
 verification record an ADR may raise `DEFAULT_FORCE_N` or replace the per-session
 ladder with a one-rung spot check; that is outside this specification.
 
@@ -286,45 +293,54 @@ ladder with a one-rung spot check; that is outside this specification.
 |---|---|---|
 | Stiffness for cube, plane, balloon | `stiffness_n_m`, default 150 N/m, clamp 20 to 1500 | P-0061 |
 | Other effects | Keep their constants, scaled by `stiffness_n_m` / 150 | design record section 3.3 |
-| Demo stiffness after measurement | 0.7 x K_marginal | P-0063 |
+| Demo stiffness after measurement | 0.7 x K_marginal (operator rule; the Studio does not apply it, its effects always run at 150 N/m) | P-0063 |
 | Demo stiffness before measurement | 150 N/m | P-0061 |
 | Force ceiling for effects | 0.5 N after sign pulses; 1.0 N after the 1.0 N rung; never above 1.0 N | section 7 |
 
 Effects remain unclamped model commands; the SDK envelope clamps them. A hard-cube model
 is compliant; do not claim a physically rigid wall (spec 13 effects section). The
-0.7 factor leaves a 30 percent margin below the measured onset of oscillation, matching
+0.7 factor, which is an operator rule and not applied by the Studio, leaves a 30 percent margin below the measured onset of oscillation, matching
 the "back off 30 percent" practice cited in P-0054's source.
 
 ## 9. Evidence schema 2
 
 One directory per session: `captures/calibration/<utc>-<session_id>/` containing
-`session.json` (connect time, registration, checks, unlock history) and, per attempt,
+`session.json` (connect time, registration, checks, unlock history, `lift` with F_0, the
+F_m per mass and the gain, and `k_marginal_n_mm`; the last two are additive fields and
+the schema stays 2) and, per attempt,
 `<attempt_id>-<step>.csv` and `<attempt_id>-<step>.json`. Schema 1 remains the viewer's
 workspace capture format and is unchanged (spec 13).
 
 ```json
-{ "schema": 2, "kind": "haptics-verification-attempt",
-  "session_id": "uuid", "attempt_id": 7, "step": "ladder",
-  "params": { "axis": "y", "sign": "neg", "rung_n": 0.5, "ramp_s": 0.5, "dwell_s": 2.0 },
-  "started_utc": "2026-10-18T10:01:02Z", "duration_s": 4.0,
-  "software": { "git_commit": "sha", "sdk": { "max_force_n": 2.0, "max_dac": 300,
-                "slew_n_s": 100, "timeout_ms": 25, "unit_derating": 1.0 } },
-  "limits": { "force_n": 0.5, "slew_n_s": 100, "dac_counts": 96 },
-  "registration": { "reset_counts": [0,0,0,0,0,0], "captured_utc": "..." },
-  "stop": { "reason": "completed", "detail": "" },
-  "telemetry_summary": { "samples": 1667, "max_interval_ms": 2.9, "stale_ticks": 0,
-        "force_capped_ticks": 0, "dac_capped_ticks": 0, "max_abs_offsets": [0,0,67] },
-  "auto": { "lockin_amplitude_counts": null, "noise_counts": null, "sign_agrees": null,
-        "liftoff_force_n": null, "k_marginal_n_mm": null, "oscillation": false },
-  "operator": { "readings": [ { "label": "dwell", "value": 0.47, "unit": "N" } ],
-        "felt": null, "heard": null, "note": "" },
-  "verdict": { "pass": true, "rule": "0.8c-0.05 <= m <= 1.2c+0.05", "unlocks": ["N1_0"] },
-  "csv": { "file": "0007-ladder.csv", "sha256": "..." },
-  "claim": "Commands are model values; delivered force only from operator readings" }
+{
+  "schema": 2,
+  "kind": "haptics-verification-attempt",
+  "session_id": "f89602ad-b4bf-4610-972d-297d1db88b02",
+  "attempt_id": 16,
+  "step": "ladder",
+  "params": {"axis": "z", "csv_row_every": 1, "dwell_s": 2.0, "ramp_s": 0.5, "rung_n": 0.5, "sign": "pos"},
+  "started_utc": "2026-10-17T12:15:07Z",
+  "duration_s": 4.0008,
+  "software": {"git_commit": "f9e245bc0ed9b80f22c17102590451a9e9d1165c", "sdk": {"max_force_n": 2.0, "max_dac": 300, "slew_n_s": 100.0, "timeout_ms": 25, "unit_derating": 1.0}},
+  "limits": {"force_n": 0.5, "slew_n_s": 100.0, "dac_counts": 96},
+  "registration": {"reset_counts": [2000, -601, 866, 0, 0, 0], "captured_utc": "2026-10-17T12:15:06Z"},
+  "stop": {"reason": "completed", "detail": "phase zero at 4.00 s, position [-0.0, -0.0010039353197059035, -3.313524741388463e-5]"},
+  "telemetry_summary": {"samples": 1667, "max_interval_ms": 2.4, "stale_ticks": 0, "force_capped_ticks": 0, "dac_capped_ticks": 0, "max_abs_offsets": [0, 67, 0]},
+  "auto": {"lockin_amplitude_counts": null, "noise_counts": null, "lockin_encoder": null, "lockin_pass": null, "sign_agrees": null, "liftoff_force_n": null, "k_marginal_n_mm": null, "oscillation": false},
+  "operator": {"readings": [{"label": "dwell", "value": 0.2997494648604751, "unit": "N"}], "felt": null, "heard": null, "note": ""},
+  "verdict": {"kind": "under", "pass": false, "rule": "pass: m >= 0.8c-0.05; over: m > 1.2c+0.05 or oscillation; none: below the pass band and m < 0.05 N (nothing delivered); else under; m 0.300 N of c 0.50 N, slope 0.60", "unlocks": ["Rung 1.0 N"]},
+  "csv": {"file": "0016-ladder.csv", "sha256": "c71e286225bfb2b9d020698f73152568fc1aad0632808110f046a4bc41cd5685"},
+  "claim": "Commands are model values; delivered force only from operator readings"
+}
 ```
 
+The example is `0016-ladder.json` from a smoke-test run against the simulated plant
+(the simulator delivers 0.6 of the command, so a 0.5 N rung reads 0.30 N and scores
+Under). It is regenerated, not hand-written; it is not a measurement.
+
 The `claim` string is mandatory in every attempt file. The CSV has one row per servo
-tick with these columns:
+tick (thermal: one in ten, plus the final tick; see `params.csv_row_every`) with these
+columns:
 
 | Group | Columns |
 |---|---|
@@ -358,12 +374,12 @@ amplifier off, and report the attempt id.
 | 2 | Backdrive (motors off): pull the pen slowly with the gauge along X, Y, Z near mid pose; enter readings | Any reading above 0.2 N: inspect cables |
 | 3 | Liveness on ch0, ch1, ch2 in turn: pen near the reset pose, fingertips only, phone 10 cm from the drive housing, hold 2 s, enter felt and heard | No channel passes: end the session. One or two fail: stop and report which |
 | 4 | Registration: place the arm in the reset pose with the set square, hold still, Register. Move away and return | Return-to-reset disagrees by more than 2 mm: redo |
-| 5 | Gravity drop: release the pen from mid height onto your palm 2 cm below. Ruler: for X, Y, Z mark start, slide 50 mm along the square, mark end, enter mm. Record which physical direction is +X and +Z | Sign disagreement or off-axis above 15 percent. Scale outside 0.8 to 1.25 is warned, not a stop |
+| 5 | Gravity drop: arm it in the Studio first, then release the pen from mid height onto your palm 2 cm below. Ruler: for X, Y, Z mark start, slide 50 mm along the square, mark end, enter mm. Record which physical direction is +X and +Z | Sign disagreement or off-axis above 15 percent. Scale outside 0.8 to 1.25 is warned, not a stop |
 | 6 | Sign pulses X, Y, Z with the pen floated on a fingertip | Any disagreement: report, do not continue to rungs |
 | 7 | Ladder rungs 0.1, 0.25, 0.5 N: Y with the pen pressing down on the scale (tare at zero command, -Y only); X and Z with the gauge against the post. Read the steady value during the dwell; enter it after release | Any reading above 1.2 x commanded + 0.05 N |
 | 8 | Effects at 0.5 N (cube, plane, detents first): fingertip contact, then light grip. Report what you feel; this is the first moment the P-0033 question is answered | Anything unexpected |
 | 9 | Rung 1.0 N on X, Y, Z (unlocks after step 7) | Same as step 7 |
-| 10 | Lift test: rest the pen on the book stack at reset height, hands off. Run bare, then 50 g, then 100 g. The app records F_0 and the gain | Arm walks sideways more than 25 mm or rises fast |
+| 10 | Lift test: rest the pen on the book stack at reset height, hands off. Run bare, then 50 g, then 100 g. The app records F_0 and the gain g = m g / (F_m - F_0), delivered per commanded; compare it with the ladder slope s = m / c, expecting g close to s | Arm walks sideways more than 25 mm or rises fast |
 | 11 | Rung 2.0 N (Y on the scale is enough for session one). Optional in session one | Same as step 7 |
 | 12 | Wall ramp (after step 9): touch the plane lightly, about 1 mm in, loose grip. Release at the first sustained buzz; the app also stops itself. Do not push deeper | First sustained buzz |
 | 13 | Thermal (later session): pen braced down on the scale, 1.0 N for 10 min, Confirm every 30 s, enter casing temperature each minute at the same spot | Rise of 10 C |

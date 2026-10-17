@@ -1,4 +1,4 @@
-# Overload archaeology and calibration baseline — 2026-10-16
+# Overload archaeology and calibration baseline: 2026-10-16
 
 The owner recalls a release of resistance at excessive load and requests that
 we identify all contributing conditions before interpreting collision tests.

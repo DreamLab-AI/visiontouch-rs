@@ -46,9 +46,10 @@ pub struct Auto {
     pub lockin_pass: Option<bool>,
     /// The sign pulse pair moved the pen the expected way.
     pub sign_agrees: Option<bool>,
-    /// Commanded Y force at lift-off, newtons.
+    /// Norm of the force the guard applied on the tick before lift-off, newtons (a
+    /// model value, not a measurement).
     pub liftoff_force_n: Option<f64>,
-    /// Wall stiffness at which oscillation began, N/mm.
+    /// Last wall stiffness that held without oscillation, N/mm.
     pub k_marginal_n_mm: Option<f64>,
     /// Oscillation stopped the attempt.
     pub oscillation: bool,
@@ -87,7 +88,10 @@ pub struct Operator {
 /// Verdict block.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct VerdictRecord {
-    /// Pass, over, under or pending.
+    /// What was concluded. Ladder: `pending-reading`, `aborted`, then `pass`, `over`,
+    /// `under` or `none` once read. Liveness, sign and thermal: `auto-pass`, `auto-fail`,
+    /// `pass`, `fail`, `inconclusive` or `completed`/`stopped`. Lift: `liftoff` or
+    /// `no-liftoff`. Wall: `oscillation` or `stable`. Others: `recorded`.
     pub kind: String,
     /// True for a pass; absent while pending.
     pub pass: Option<bool>,
@@ -296,11 +300,28 @@ pub struct SessionRecord {
     pub unlock_history: Vec<String>,
     /// Attempt stems written so far.
     pub attempts: Vec<String>,
+    /// Lift-off forces and the gain derived from them (additive field, schema stays 2).
+    #[serde(default)]
+    pub lift: LiftRecord,
+    /// Last wall stiffness that held without oscillation, N/mm (additive field).
+    #[serde(default)]
+    pub k_marginal_n_mm: Option<f64>,
     /// The claim.
     pub claim: String,
 }
 
-/// CSV columns in order (design section 4).
+/// Lift results persisted in the session file.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct LiftRecord {
+    /// Bare lift-off force F_0, model newtons.
+    pub f0_n: Option<f64>,
+    /// `(mass_g, F_m)` per hung mass; bare is mass 0.
+    pub entries: Vec<(f64, f64)>,
+    /// Lift gain `m g / (F_m - F_0)`, averaged (spec 14 section 6.6).
+    pub gain: Option<f64>,
+}
+
+/// CSV columns in order (spec 14 section 9).
 pub fn csv_header() -> String {
     let mut c: Vec<String> = ["t_s", "interval_us", "io_us", "raw_hex"]
         .map(String::from)
@@ -757,6 +778,12 @@ mod tests {
             checks: Checks::default(),
             unlock_history: vec!["Sign pulses unlocked by x".into()],
             attempts: vec![],
+            lift: LiftRecord {
+                f0_n: Some(0.5),
+                entries: vec![(0., 0.5), (50., 1.25)],
+                gain: Some(0.65),
+            },
+            k_marginal_n_mm: Some(0.7),
             claim: CLAIM.into(),
         };
         write_session(&off, &dir, &rec).unwrap();

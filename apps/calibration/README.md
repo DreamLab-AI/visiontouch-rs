@@ -30,10 +30,12 @@ not establish physical repeatability. Reconnecting requires registration again.
 
 Nothing persists across connections: a reconnect forgets every verdict. A refused
 Start names the missing prerequisite. Rung verdicts, with `m` measured and `c`
-commanded: **Over** if `m > 1.2c + 0.05 N` or the arm oscillates (blocks the next rung
-on that axis), **Pass** if `m >= 0.8c - 0.05 N`, otherwise **Under** (recorded with
-its slope, not blocking). A rung is cleared on an axis when one sign has a verdict and
-none is Over.
+commanded: **Over** if `m > 1.2c + 0.05 N` or the arm oscillates (locks every force
+step for the rest of the connection; re-registration does not clear it, only a
+reconnect does), **Pass** if `m >= 0.8c - 0.05 N`, **None** if the band is missed and
+a completed dwell read under 0.05 N (nothing delivered: it neither clears the rung nor
+locks), otherwise **Under** (recorded with its slope, clears the rung, not blocking).
+A rung is cleared on an axis when one sign is Pass or Under and none is Over.
 
 | Unlocks | Requires | Limits |
 |---|---|---|
@@ -41,7 +43,7 @@ none is Over.
 | Sign pulses | liveness on all 3 channels (felt, heard or lock-in), registration, return to reset within 2 mm, gravity drop toward -Y, ruler sign and off-axis on X, Y, Z | 0.5 N, 96 counts |
 | 0.1 to 0.5 N rungs, effects at 0.5 N, lift to 0.5 N | sign pulses on X, Y, Z | 0.5 N, 96 counts |
 | 1.0 N rung, lift to 1.0 N | 0.5 N rung cleared on X, Y, Z | 1.0 N, 300 counts |
-| 2.0 N rung, lift to 2.0 N | 1.0 N rung cleared on X, Y, Z | 2.0 N, 300 counts |
+| 2.0 N rung, lift to 1.5 N | 1.0 N rung cleared on X, Y, Z | 2.0 N, 300 counts |
 | Effects to 1.0 N, wall ramp, thermal | 1.0 N rung cleared on X, Y, Z | 1.0 N, 300 counts |
 
 The studio is the only consumer that builds limits above the SDK defaults, only inside
@@ -53,7 +55,7 @@ Hold key (all but thermal, which needs a Confirm every 30 s with a 10 s grace), 
 heartbeat under 250 ms, sample interval under 25 ms, pen button, filtered speed
 (50 mm/s, or 400 mm/s for effects and wall), excursion from the start pose (3 mm ladder
 and thermal, 15 mm liveness and sign, 25 mm lift, 150 mm effects and wall), time bound
-(4, 1, 4, 60, 60, 660, 180 s for liveness, sign, ladder, lift, effects, thermal, wall),
+(4, 1.5, 4, 60, 180, 660, 60 s for liveness, sign, ladder, lift, effects, thermal, wall),
 more than 10 s above 1.0 N, lift-off above 2 mm, and a wall oscillation detector
 (5 to 60 Hz band-passed Y velocity, RMS above 15 mm/s over 0.5 s). Any stop zeroes the
 demand on the same tick, output is disarmed, and only then is evidence written.
@@ -65,7 +67,9 @@ demand on the same tick, output is disarmed, and only then is evidence written.
 git commit read at run time, limits, registration, stop reason, telemetry summary,
 automatic measurements and the operator entries. Entries (gauge N, scale g,
 temperature C, ruler mm, felt and heard) are keyed to the attempt id and accepted only
-while output is off. Commit a session directory to `docs/evidence/` after the owner
+while output is off (the engine refuses them while an attempt runs; the one exception
+is the casing temperature in C during a thermal hold). `session.json` also records the
+lift results (F_0, F_m per mass, gain) and `k_marginal_n_mm`. Commit a session directory to `docs/evidence/` after the owner
 session. The coverage cloud exports as a plain viewer schema 1 capture.
 
 ## Modules

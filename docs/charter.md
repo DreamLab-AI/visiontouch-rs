@@ -13,7 +13,7 @@ property is understood to have passed SensAble → Geomagic (2012) → 3D System
 
 - Device on hand: user describes it as a "PHANTOM pro v1 parallel desktop".
   Exact model (PHANTOM Desktop vs PHANTOM Premium 1.0) to be confirmed from
-  the base-plate label — see `docs/hardware/identification.md`.
+  the base-plate label: see `docs/hardware/identification.md`.
 - Host: CachyOS (Arch-based), PCIe parallel-port card installed, DB25 cable
   connected, and the kernel enumerates the port.
 - No code yet. This repository currently holds research and legal notes only.
@@ -41,7 +41,7 @@ its interface, and the reimplementation. This matters legally:
 1. Establish, **before any reverse engineering**, a written legal position and
    a clean-room process that is proportionate to a small open-source project.
 2. Identify the device precisely and collect the publicly available technical
-   record (papers, theses, patents, manuals) — the "readily available
+   record (papers, theses, patents, manuals): the "readily available
    information" that UK/EU law requires us to exhaust before decompiling.
 3. Capture the wire protocol by **observation** (logic analyser / port trace)
    from the original hardware + software, in preference to decompilation.

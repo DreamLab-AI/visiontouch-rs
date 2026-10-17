@@ -1,6 +1,6 @@
 //! Steps, step plans, rung scoring and the per-session unlock ladder.
 //!
-//! The ladder is design section 2. Nothing persists across connections:
+//! The ladder is spec 14 section 7. Nothing persists across connections:
 //! [`Session::reconnect`] forgets every verdict. A refused start names the first
 //! missing prerequisite. Everything here is hardware-free.
 use crate::registration::Checks;
@@ -53,7 +53,7 @@ pub const WALL_LEVELS: [(f64, &str); 15] = [
     (1500., "k=1.5"),
 ];
 /// Rule shown in the evidence for ladder verdicts.
-pub const RULE: &str = "pass: m >= 0.8c-0.05; over: m > 1.2c+0.05 or oscillation; else under";
+pub const RULE: &str = "pass: m >= 0.8c-0.05; over: m > 1.2c+0.05 or oscillation; none: below the pass band and m < 0.05 N (nothing delivered); else under";
 const _: () = assert!(LIVENESS_COUNTS <= MAX_CHANNEL_TEST_OFFSET);
 
 /// A Cartesian axis of the device kinematic frame.
@@ -342,11 +342,19 @@ impl StepRequest {
 pub enum Verdict {
     /// Within the acceptance window.
     Pass,
-    /// Above the window or oscillating: blocks the next rung on that axis.
+    /// Above the window or oscillating: locks every force step for the rest of the
+    /// connection (only a reconnect clears it; re-registration does not).
     Over,
-    /// Below the window: recorded with its slope, not blocking.
+    /// Below the window but with something delivered: recorded with its slope; it
+    /// clears the rung, so it does not block.
     Under,
+    /// A completed dwell read below [`NOTHING_DELIVERED_N`]: nothing was delivered.
+    /// Recorded, but it neither clears the rung nor locks.
+    None,
 }
+
+/// Absolute reading below which a completed dwell counts as nothing delivered, newtons.
+pub const NOTHING_DELIVERED_N: f64 = 0.05;
 
 /// Score a rung: `m` measured, `c` commanded, both in newtons.
 pub fn score_rung(commanded_n: f64, measured_n: f64, oscillation: bool) -> Verdict {
@@ -354,6 +362,8 @@ pub fn score_rung(commanded_n: f64, measured_n: f64, oscillation: bool) -> Verdi
         Verdict::Over
     } else if measured_n >= 0.8 * commanded_n - 0.05 - 1e-9 {
         Verdict::Pass
+    } else if measured_n < NOTHING_DELIVERED_N {
+        Verdict::None
     } else {
         Verdict::Under
     }
@@ -441,14 +451,18 @@ impl LiftLog {
     pub fn f0(&self) -> Option<f64> {
         self.entries.iter().find(|e| e.0 == 0.).map(|e| e.1)
     }
-    /// Mean commanded newtons per newton of added weight.
+    /// Lift gain `g = m g / (F_m - F_0)`, averaged over the hung masses (spec 14
+    /// section 6.6): the added weight in newtons per extra commanded newton needed to
+    /// lift it, that is delivered per commanded. It is the ladder slope `s = m/c`
+    /// measured another way, so expect `g` close to `s`. Masses whose lift-off force
+    /// did not rise above `F_0` are skipped.
     pub fn gain(&self) -> Option<f64> {
         let f0 = self.f0()?;
         let g: Vec<f64> = self
             .entries
             .iter()
-            .filter(|e| e.0 > 0.)
-            .map(|e| (e.1 - f0) / (e.0 * 1e-3 * G_M_S2))
+            .filter(|e| e.0 > 0. && e.1 - f0 > 1e-9)
+            .map(|e| (e.0 * 1e-3 * G_M_S2) / (e.1 - f0))
             .collect();
         (!g.is_empty()).then(|| g.iter().sum::<f64>() / g.len() as f64)
     }
@@ -467,11 +481,14 @@ pub struct Session {
     pub checks: Checks,
     /// Sign pulse verdicts per axis.
     pub sign: [Option<bool>; 3],
-    /// Rung verdicts indexed `[rung][axis][sign]`.
+    /// Rung verdicts indexed `[rung][axis][sign]`. Cleared by re-registration.
     pub rungs: [[[Option<Verdict>; 2]; 3]; 5],
+    /// The first Over verdict of this connection. Unlike [`Session::rungs`] it survives
+    /// re-registration; only a reconnect clears it.
+    pub over: Option<(Rung, Axis, Sign)>,
     /// Lift test log.
     pub lift: LiftLog,
-    /// Wall stiffness at which oscillation began, N/mm.
+    /// Last wall stiffness that held without oscillation, N/mm.
     pub k_marginal_n_mm: Option<f64>,
     /// Thermal test finished without a stop.
     pub thermal: Option<bool>,
@@ -495,11 +512,15 @@ impl Session {
     pub fn disconnect(&mut self) {
         *self = Self::default();
     }
-    /// A rung is cleared on an axis when at least one sign has a non-Over verdict and
-    /// none is Over. Under is recorded, not blocking.
+    /// A rung is cleared on an axis when at least one sign has a Pass or Under verdict
+    /// and none is Over. Under is recorded, not blocking; None (nothing delivered) does
+    /// not clear.
     pub fn rung_cleared(&self, rung: Rung, axis: Axis) -> bool {
         let v = &self.rungs[rung.index()][axis.index()];
-        v.iter().flatten().all(|x| *x != Verdict::Over) && v.iter().any(Option::is_some)
+        v.iter().flatten().all(|x| *x != Verdict::Over)
+            && v.iter()
+                .flatten()
+                .any(|x| matches!(x, Verdict::Pass | Verdict::Under))
     }
     /// A rung is cleared on all three axes.
     pub fn rung_cleared_all(&self, rung: Rung) -> bool {
@@ -525,22 +546,16 @@ impl Session {
         }
         None
     }
-    /// The session-wide lock: any Over verdict on any rung, axis or sign stops every
-    /// force step until the reset pose is registered again or the device reconnects.
+    /// The connection-wide lock: an Over verdict anywhere stops every force step until
+    /// the device reconnects. Re-registration does not clear it.
     fn over_lock(&self) -> Option<String> {
-        for rung in Rung::ALL {
-            for axis in Axis::ALL {
-                let v = &self.rungs[rung.index()][axis.index()];
-                if v.iter().flatten().any(|x| *x == Verdict::Over) {
-                    return Some(format!(
-                        "no Over verdict: the {} rung is Over on {}; the session is locked until re-registration",
-                        rung.name(),
-                        axis.name()
-                    ));
-                }
-            }
-        }
-        None
+        self.over.map(|(rung, axis, _)| {
+            format!(
+                "no Over verdict: the {} rung is Over on {}; the connection is locked until reconnect",
+                rung.name(),
+                axis.name()
+            )
+        })
     }
     /// Liveness, registration and registration checks; the base of every force step.
     fn base_missing(&self) -> Option<String> {
@@ -723,6 +738,7 @@ impl Session {
         if !registered {
             self.checks = Checks::default();
             self.sign = [None; 3];
+            // `over` stays: the lock lasts for the whole connection.
             self.rungs = Default::default();
         }
         self.log_unlocks(&before, "registration")
@@ -741,9 +757,15 @@ impl Session {
     pub fn record_rung(&mut self, rung: Rung, axis: Axis, sign: Sign, v: Verdict) -> Vec<String> {
         let before = self.unlocked();
         // Over is sticky for the connection: a retest or a later reading cannot erase it.
+        if v == Verdict::Over && self.over.is_none() {
+            self.over = Some((rung, axis, sign));
+        }
         let slot = &mut self.rungs[rung.index()][axis.index()][sign.index()];
-        if *slot != Some(Verdict::Over) {
-            *slot = Some(v);
+        match *slot {
+            Some(Verdict::Over) => {}
+            // Nothing delivered must not erase an earlier real verdict.
+            Some(_) if v == Verdict::None => {}
+            _ => *slot = Some(v),
         }
         self.log_unlocks(
             &before,
@@ -1068,6 +1090,14 @@ pub(crate) mod tests {
             "0.8c-0.05 boundary"
         );
         assert_eq!(score_rung(0.5, 0.34, false), Verdict::Under);
+        assert_eq!(score_rung(0.5, 0.20, false), Verdict::Under);
+        assert_eq!(score_rung(0.5, 0.0, false), Verdict::None);
+        assert_eq!(score_rung(0.5, 0.049, false), Verdict::None);
+        assert_eq!(
+            score_rung(0.1, 0.04, false),
+            Verdict::Pass,
+            "inside the band"
+        );
         assert_eq!(score_rung(0.5, 0.65, false), Verdict::Pass);
         assert_eq!(score_rung(0.5, 0.66, false), Verdict::Over);
         assert_eq!(score_rung(0.5, 0.45, true), Verdict::Over, "oscillation");
@@ -1275,6 +1305,45 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn over_survives_reregistration_and_only_reconnect_clears_it() {
+        let mut s = unlocked_session();
+        for a in Axis::ALL {
+            s.record_sign(a, true);
+        }
+        s.record_rung(Rung::N0_25, Axis::Y, Sign::Neg, Verdict::Over);
+        s.record_registered(false);
+        s.record_registered(true);
+        let e = s
+            .check(StepRequest::Ladder {
+                axis: Axis::X,
+                sign: Sign::Pos,
+                rung: Rung::N0_5,
+            })
+            .unwrap_err();
+        assert!(e.contains("0.25 N") && e.contains("Over on Y"), "{e}");
+        s.reconnect();
+        assert!(s.over.is_none());
+    }
+
+    #[test]
+    fn nothing_delivered_does_not_clear_but_under_does() {
+        let mut s = unlocked_session();
+        let v0 = score_rung(0.5, 0.0, false);
+        s.record_rung(Rung::N0_5, Axis::X, Sign::Pos, v0);
+        assert!(!s.rung_cleared(Rung::N0_5, Axis::X), "0.00 N delivered");
+        assert!(s.over.is_none(), "None does not lock");
+        let v1 = score_rung(0.5, 0.20, false);
+        assert_eq!(v1, Verdict::Under);
+        s.record_rung(Rung::N0_5, Axis::X, Sign::Pos, v1);
+        assert!(s.rung_cleared(Rung::N0_5, Axis::X), "Under clears");
+        s.record_rung(Rung::N0_5, Axis::X, Sign::Pos, Verdict::None);
+        assert!(
+            s.rung_cleared(Rung::N0_5, Axis::X),
+            "None keeps an earlier verdict"
+        );
+    }
+
+    #[test]
     fn lift_ramp_is_slow_to_one_newton_then_faster_to_the_cap() {
         let mut p = Plan::new(StepRequest::Lift { mass_g: None }, 1.5, [0.; 3], None);
         assert_eq!(p.duration_s(), Some(26.));
@@ -1313,7 +1382,10 @@ pub(crate) mod tests {
         let mut s = Session::connected();
         s.record_lift(0., 0.5);
         assert_eq!(s.lift.gain(), None);
-        s.record_lift(100., 0.5 + 0.5 * 0.1 * G_M_S2);
+        // 100 g adds m g = 0.098 N of weight. Lift-off needed 2 x that extra commanded,
+        // so delivered per commanded is 0.5. F_m - F_0 is commanded, m g is delivered:
+        // g = m g / (F_m - F_0) = 0.5, the same quantity as the ladder slope m / c.
+        s.record_lift(100., 0.5 + 2. * 0.1 * G_M_S2);
         let g = s.lift.gain().unwrap();
         assert!((g - 0.5).abs() < 1e-9, "{g}");
     }

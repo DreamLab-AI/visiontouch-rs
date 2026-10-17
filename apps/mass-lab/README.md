@@ -64,7 +64,7 @@ properties wakes sleeping bodies. Reset preserves world settings and pauses.
 
 ## Live haptic pointer
 
-The app now connects to `/dev/parport0` through the existing Rust `DeviceReader`
+The app now connects to `/dev/parport0` through `visiontouch_device::Device`
 and shows a cyan pointer and trail. `scripts/run-mass-lab` refreshes port-access
 groups through the existing launcher. The desktop entry also uses this launcher.
 Reads run on a worker thread so the UI stays responsive; disconnect/error releases

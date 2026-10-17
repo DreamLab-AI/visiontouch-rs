@@ -49,7 +49,7 @@ pub struct ClassLimits {
     /// Output requires a held key (Thermal uses Confirm instead).
     pub needs_hold: bool,
 }
-/// Limits per class, from design section 3.2.
+/// Limits per class, from spec 14 section 5.
 pub fn class_limits(class: Class) -> ClassLimits {
     let (speed, excursion, bound, hold) = match class {
         Class::Backdrive => (0.4, 0.15, 60., false),

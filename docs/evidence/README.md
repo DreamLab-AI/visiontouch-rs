@@ -18,8 +18,8 @@ SHA-256 of each large or lossless file.
 
 ## Promotion from `archive/`
 
-`archive/` is the gitignored local holding area for raw captures and scratch material
-(ADR-0005). Material becomes evidence only by promotion:
+`archive/` is the gitignored local holding area for raw captures and scratch material.
+Material becomes evidence only by promotion:
 
 1. Confirm the material answers a question a provenance row asks and contains no vendor
    artefact, serial number or personal data.
@@ -48,12 +48,13 @@ verification session here; a command value never counts (AGENTS.md rule 4).
 | Path | Contents | Row |
 |---|---|---|
 | `input-only-sweep-20261016/` | Input-only workspace sweep, 31,271 samples, never armed | P-0044 |
+| `liveness-cadence-20261017/` | Three attended liveness attempts that stopped on the speed interlock; the cadence correction | P-0065 |
 | `owner-photos-20261016.zip` | Three owner photographs of the unit | P-0043 |
 
 ## Owner photographs
 
 `owner-photos-20261016.zip` holds three photographs of the owner's unit taken on
-2026-10-16 (P-0040 row family). They show the base name plate and a motor
+2026-10-16 (P-0043). They show the base name plate and a motor
 part-number label. Those are referential identification of lawfully owned
 hardware, the same facts `docs/hardware/identification.md` records, and are not
 vendor software artefacts under `docs/clean-room/POLICY.md` rule 5. Reviewed

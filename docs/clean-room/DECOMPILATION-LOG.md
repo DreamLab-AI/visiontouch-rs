@@ -8,7 +8,7 @@ observation could not answer it, who performed it (spec team member), and the
 resulting PROVENANCE.md row IDs. The output of the decompiler must not be
 committed to this repository.
 
-## D-0001 — 2026-10-16 — bounded force-release investigation
+## D-0001: 2026-10-16: bounded force-release investigation
 
 Owner explicitly requested examination of the reference stack's critical overload
 release path, including the Windows parallel driver for the identified 1.0A.
@@ -49,7 +49,7 @@ explicit disable paths; no hardware overload threshold or safe kernel watchdog
 was established. Any findings
 derived from instruction analysis are DECOMPILE and excluded from the paper.
 
-## D-0002 — 2026-10-16 — Windows demo safety and calibration lifecycle
+## D-0002: 2026-10-16: Windows demo safety and calibration lifecycle
 
 Owner explicitly requests finding and decompiling the old Windows demo pack
 using REA to understand safety boundaries, rather than importing its code.

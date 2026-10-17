@@ -46,8 +46,9 @@ legal re-review.
    OBSERVE delivered-force evidence (ADR-0002, ADR-0003).
 6. **CI never opens hardware.** `scripts/quality-gate.sh` is the gate; nothing in it
    touches `/dev/parport0`. Graphics smoke modes are optional and local.
-7. **Public Rust APIs are documented.** Every crate enables `missing_docs`; strict
-   rustdoc is part of the gate.
+7. **Public Rust APIs are documented.** Every library crate (`hal`, `device`,
+   `effects`) enables `missing_docs`; apps and tools are covered by strict rustdoc
+   only, which is part of the gate.
 8. **Hand-rolled cryptography is forbidden** (none is needed here); the port
    recorder's preload shim is the only C/assembly and stays test-covered.
 
@@ -63,5 +64,5 @@ legal re-review.
   Studio), `apps/mass-lab` (physics sandbox), `apps/workspace-viewer` (Three.js
   reconstruction), `tools/` (Rust probe, recorder and readout crates plus the audio analysis tool), `scripts/` (launchers, port-access helper, quality gate, ADR index), `archive/` (gitignored local holding area).
 - Diagrams for this repository live in the estate canon at
-  `VisionFlow/docs/diagrams/visiontouch-rs/` (area id `HR`), not here.
+  `VisionFlow/docs/diagrams/visiontouch-rs/` (area `VT`, VT-01 to VT-08), not here.
 - UK English, no em-dashes in prose, no trademarks in crate or binary names.

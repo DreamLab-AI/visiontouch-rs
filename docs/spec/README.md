@@ -22,6 +22,9 @@ Implemented specifications:
   registration checks, staged verification steps, unlock ladder, evidence schema 2
   and the owner runbook. Not yet run on the unit.
 
+- [Calibration worker cadence](15-servo-cadence.md): the nominal 2.4 ms servo cadence,
+  the time-window interlock velocity and the evidence behind them (P-0065).
+
 Future phases, each citing `PROVENANCE.md` row IDs:
 
 - `20-mode-negotiation.md`

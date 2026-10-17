@@ -1,4 +1,4 @@
-# Driver acquisition and examination — 2026-10-16
+# Driver acquisition and examination: 2026-10-16
 
 ## Live outcome
 

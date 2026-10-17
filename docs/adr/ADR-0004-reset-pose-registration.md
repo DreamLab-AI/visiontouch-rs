@@ -40,7 +40,7 @@ Studio draws the arm as a registered wireframe model (base, shoulder, upper link
 elbow, lower link, tip, gimbal stub) with a ghost of the reset pose, and validates
 registration by three discriminating checks: return-to-reset repeatability within
 2 mm, gravity-drop sign (a released pen moves along negative Y), and a per-axis
-50 mm ruler move with scale in [0.8, 1.25] and off-axis motion at most 15%
+50 mm ruler move with scale in [0.8, 1.25] (warned, not gating) and off-axis motion at most 15%
 (P-0057, P-0062). The motor-off sweep survives only as a 2 mm-cell coverage cloud
 for display and viewer export. The bottom reference, six-bound box, working
 coordinates, slow move to zero, straight and freehand route teaching, five-minute

@@ -479,6 +479,12 @@ impl<H: Hardware> Engine<H> {
             checks: self.session.checks.clone(),
             unlock_history: self.session.history.clone(),
             attempts: self.done.iter().map(|d| d.record.stem()).collect(),
+            lift: evidence::LiftRecord {
+                f0_n: self.session.lift.f0(),
+                entries: self.session.lift.entries.clone(),
+                gain: self.session.lift.gain(),
+            },
+            k_marginal_n_mm: self.session.k_marginal_n_mm,
             claim: evidence::CLAIM.into(),
         };
         evidence::write_session(off, &dir, &rec)
@@ -1000,6 +1006,11 @@ impl<H: Hardware> Engine<H> {
     fn submit_reading(&mut self, id: u64, readings: Vec<Reading>) {
         if readings.iter().any(|r| !r.value.is_finite()) {
             return self.say("Readings must be finite numbers.");
+        }
+        if self.running.is_some() && readings.iter().any(|r| r.unit != Unit::C) {
+            return self.say(
+                "Reading refused: output is on; readings are accepted only while output is off.",
+            );
         }
         if let Some(run) = self.running.as_mut().filter(|r| r.record.attempt_id == id) {
             let req = run.req;
@@ -1587,6 +1598,10 @@ mod tests {
         // Running attempt: even a newton reading is held back from the dwell record.
         gauge(&mut e, 1, 20., Unit::C);
         assert!(e.status().contains("N or g"), "{}", e.status());
+        gauge(&mut e, 1, 0.5, Unit::N);
+        assert!(e.status().contains("output is on"), "{}", e.status());
+        gauge(&mut e, 1, 500., Unit::G);
+        assert!(e.status().contains("output is on"), "{}", e.status());
         while e.active().is_some() {
             e.step(true, 0.).unwrap();
         }

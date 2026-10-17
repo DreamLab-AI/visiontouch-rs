@@ -243,9 +243,12 @@ pub fn run(root: &Path) -> Result<Report, String> {
     }
     let gain = r.e.session.lift.gain().ok_or("no lift gain")?;
     check(
-        (1.4..1.9).contains(&gain),
+        (0.5..0.7).contains(&gain),
+        // The plant delivers 0.6 N per commanded newton. Lift-off of a hung mass needs
+        // (F_m - F_0) commanded newtons to deliver m g extra, so g = m g / (F_m - F_0)
+        // is delivered per commanded: 0.6, equal to the ladder slope, not its reciprocal.
         &format!(
-            "lift gain is about 1 / 0.6, got {gain} from {:?}",
+            "lift gain is about 0.6 (delivered per commanded), got {gain} from {:?}",
             r.e.session.lift.entries
         ),
     )?;

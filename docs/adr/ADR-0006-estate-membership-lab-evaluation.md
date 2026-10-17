@@ -43,7 +43,7 @@ referentially with the non-affiliation statement.
 ## Consequences
 
 Estate documents can cite this repository, its diagrams live in the canon under
-area `HR`, and the estate health roster lists it (as a private repository it reads
+area `VT`, and the estate health roster lists it (as a private repository it reads
 amber for CI visibility, which is accepted). Opening the repository, publishing
 binaries, or demonstrating to third parties each re-open ADR-0001's legal review
 before anything else happens. The VisionClaw integration, when started, is its own
@@ -53,5 +53,5 @@ ADR in both ledgers.
 
 `AGENTS.md` and `README.md` state the posture. The VisionFlow canon carries
 ADR-2017, the roster row, the repository-map row, the website card and the
-diagrams area `docs/diagrams/visiontouch-rs` (VT-01 to VT-07) at VisionFlow
+diagrams area `docs/diagrams/visiontouch-rs` (VT-01 to VT-08) at VisionFlow
 commit 1e3bdd0 (re-stamped at fee91eb).
