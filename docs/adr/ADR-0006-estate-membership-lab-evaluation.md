@@ -2,12 +2,12 @@
 id: ADR-0006
 title: Hold this repository in the VisionFlow research estate as a lab evaluation with no economic use
 date: 2026-10-17
-decision_status: proposed
-implementation_status: none
-activation_status: inactive
+decision_status: accepted
+implementation_status: partial
+activation_status: staged
 supersedes: []
 superseded_by: []
-verified_commit:
+verified_commit: e6f9d018f1ee88bd4db315937c9d66a3b95d1818
 verified_paths: [AGENTS.md, README.md, docs/legal/POSITION.md]
 owner: jjohare
 review_trigger: any intent to publish the repository, distribute software, demonstrate outside the lab, or begin the VisionClaw integration

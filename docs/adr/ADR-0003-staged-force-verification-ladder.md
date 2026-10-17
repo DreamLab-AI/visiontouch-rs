@@ -2,12 +2,12 @@
 id: ADR-0003
 title: Verify force output through a staged, per-session unlock ladder before any demo or application feels it
 date: 2026-10-17
-decision_status: proposed
-implementation_status: none
-activation_status: inactive
+decision_status: accepted
+implementation_status: complete
+activation_status: staged
 supersedes: []
 superseded_by: []
-verified_commit:
+verified_commit: e6f9d018f1ee88bd4db315937c9d66a3b95d1818
 verified_paths: [apps/calibration/src/protocol.rs, apps/calibration/src/controller.rs, docs/spec/14-force-calibration.md]
 owner: jjohare
 review_trigger: a committed OWNER verification record (docs/evidence/force-verification-*), after which the per-session ladder may become a spot check
@@ -60,7 +60,7 @@ key-held 180 s interlock.
 
 ## Verification
 
-To be recorded when the implementation lands: `cargo test -p visiontouch-studio`
+Recorded at the commit above: `cargo test -p visiontouch-studio`
 (protocol unlock table, controller interlocks, evidence round trip, smoke run of
 every step against the simulated plant). Physical verification is the owner's
 session per the spec appendix; its records become OWNER rows and a

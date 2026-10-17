@@ -1,7 +1,7 @@
 ---
 title: BASELINE for visiontouch-rs
 version: 1
-verified_commit:
+verified_commit: e6f9d01
 status: living governing document; amended only through docs/adr records
 ---
 

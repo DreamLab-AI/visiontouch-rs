@@ -2,12 +2,12 @@
 id: ADR-0002
 title: Bound motor output with a DAC-derived software envelope that applications can only tighten
 date: 2026-10-17
-decision_status: proposed
-implementation_status: none
-activation_status: inactive
+decision_status: accepted
+implementation_status: complete
+activation_status: live
 supersedes: []
 superseded_by: []
-verified_commit:
+verified_commit: e6f9d018f1ee88bd4db315937c9d66a3b95d1818
 verified_paths: [crates/device/src/lib.rs, crates/hal/src/device.rs]
 owner: jjohare
 review_trigger: the first OWNER delivered-force record (gauge slope or lift gain), or any change to crates/hal MAX_MOTOR_OFFSET
@@ -59,7 +59,7 @@ forces, until the verification ladder produces OWNER rows.
 
 ## Verification
 
-To be recorded when the implementation lands: `cargo test -p visiontouch-device
+Recorded at the commit above: `cargo test -p visiontouch-device
 -p visiontouch-hal` including `default_limits_are_the_p0030_envelope`,
 `limits_cannot_exceed_ceilings`, `dac_scaling_preserves_direction`,
 `channel_demand_bypasses_slew_but_not_expiry_or_96_cap`,

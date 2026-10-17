@@ -7,7 +7,7 @@ implementation_status: complete
 activation_status: live
 supersedes: []
 superseded_by: []
-verified_commit: bef1ccd9851b4121635662ba7749e65bb45ec925
+verified_commit: e6f9d018f1ee88bd4db315937c9d66a3b95d1818
 verified_paths: [docs/clean-room/POLICY.md, docs/legal/POSITION.md, .gitignore]
 owner: jjohare
 review_trigger: any intent to distribute software, any decompilation request, any contact from the rights holder

@@ -2,12 +2,12 @@
 id: ADR-0005
 title: Retrofit the repository with the estate's build-with-quality gates and a local ADR ledger
 date: 2026-10-17
-decision_status: proposed
-implementation_status: partial
-activation_status: staged
+decision_status: accepted
+implementation_status: complete
+activation_status: live
 supersedes: []
 superseded_by: []
-verified_commit:
+verified_commit: e6f9d018f1ee88bd4db315937c9d66a3b95d1818
 verified_paths: [scripts/quality-gate.sh, scripts/adr-index-gen.cjs, .github/workflows/ci.yml, AGENTS.md]
 owner: jjohare
 review_trigger: a gate that cannot run on GitHub-hosted runners, or a change to the estate ADR status contract
@@ -54,4 +54,4 @@ is available and are excluded from the hosted runner.
 
 `scripts/quality-gate.sh` exits 0 locally; `node scripts/adr-index-gen.cjs
 docs/adr --check` exits 0. The workflow file is validated by the first push.
-`verified_commit` is filled in by the commit that lands this record.
+`verified_commit` is the commit that landed this record.

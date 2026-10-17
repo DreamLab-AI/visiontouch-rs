@@ -2,12 +2,12 @@
 id: ADR-0004
 title: Register the arm at the published reset pose; remove the bottom-reference, box, sweep-authority and route workflows
 date: 2026-10-17
-decision_status: proposed
-implementation_status: none
-activation_status: inactive
+decision_status: accepted
+implementation_status: complete
+activation_status: live
 supersedes: []
 superseded_by: []
-verified_commit:
+verified_commit: e6f9d018f1ee88bd4db315937c9d66a3b95d1818
 verified_paths: [crates/device/src/lib.rs, apps/calibration/src/registration.rs, apps/calibration/src/arm.rs]
 owner: jjohare
 review_trigger: an OWNER ruler or repeatability record outside the acceptance band, or a physical measurement of the link lengths
@@ -58,7 +58,7 @@ bottom-reference import branch. P-0034, P-0042, P-0045 to P-0048 become history.
 
 ## Verification
 
-To be recorded when the implementation lands: `cargo test -p visiontouch-device
+Recorded at the commit above: `cargo test -p visiontouch-device
 -p visiontouch-studio` including `registered_reset_pose_is_origin_and_reconnect_clears`
 and the registration module tests (stillness, ruler scale and off-axis,
 gravity-drop sign, repeatability); `arm.rs` matches `geometry.mjs` at counts zero
