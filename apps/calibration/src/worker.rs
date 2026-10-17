@@ -1260,6 +1260,9 @@ impl Drop for Worker {
     }
 }
 
+// P-0065: real I/O must not turn a four-tick filter into a 1 ms window.
+const SERVO_PERIOD: Duration = Duration::from_micros(2400);
+
 fn run(
     rx: mpsc::Receiver<Command>,
     tx: mpsc::SyncSender<Snapshot>,
@@ -1289,6 +1292,7 @@ fn run(
             last_pulse = pulse;
             pulse_at = Instant::now();
         }
+        let cycle_started = Instant::now();
         if engine.connected() {
             let age = pulse_at.elapsed().as_secs_f64() * 1e3;
             let _ = engine.step(controls.held.load(Ordering::Relaxed), age);
@@ -1299,6 +1303,11 @@ fn run(
             last_snapshot = Instant::now();
             let _ = tx.try_send(engine.snapshot());
         }
+        if engine.connected() {
+            // Account for work already spent. Never catch up after an overrun;
+            // Engine::step still measures the real interval for the gap interlock.
+            thread::sleep(SERVO_PERIOD.saturating_sub(cycle_started.elapsed()));
+        }
     }
 }
 
@@ -1306,6 +1315,83 @@ fn run(
 mod tests {
     use super::*;
     use crate::sim::{SimHw, SimPlant};
+
+    #[test]
+    fn captured_liveness_speed_trips_depend_on_unpaced_sampling() {
+        let captures = [
+            include_str!("../../../docs/evidence/liveness-cadence-20261017/0003-liveness.csv"),
+            include_str!("../../../docs/evidence/liveness-cadence-20261017/0004-liveness.csv"),
+            include_str!("../../../docs/evidence/liveness-cadence-20261017/0005-liveness.csv"),
+        ];
+        for (channel, csv) in captures.into_iter().enumerate() {
+            let header: Vec<_> = csv.lines().next().unwrap().split(',').collect();
+            let index = |name| header.iter().position(|c| *c == name).unwrap();
+            let rows: Vec<(f64, V)> = csv
+                .lines()
+                .skip(1)
+                .map(|line| {
+                    let cols: Vec<_> = line.split(',').collect();
+                    (
+                        cols[index("t_s")].parse().unwrap(),
+                        ["x_m", "y_m", "z_m"].map(|name| cols[index(name)].parse().unwrap()),
+                    )
+                })
+                .collect();
+            for paced in [false, true] {
+                let base = Instant::now();
+                let input = |t, p, dt| TickInput {
+                    now: base + Duration::from_secs_f64(t),
+                    interval_s: dt,
+                    io_us: 280,
+                    held: true,
+                    ui_age_ms: 0.,
+                    button: false,
+                    counts: [0; 6],
+                    continuous: [0; 6],
+                    registered: None,
+                    position: p,
+                    raw: [0; 16],
+                    telemetry: Default::default(),
+                };
+                let first = input(rows[0].0, rows[0].1, 0.0024);
+                let mut c = Controller::default();
+                c.start(
+                    StepRequest::Liveness { channel },
+                    crate::protocol::Allowance {
+                        limits: ForceLimits::default(),
+                        cap_n: 0.5,
+                    },
+                    &first,
+                    None,
+                )
+                .unwrap();
+                let mut previous = None;
+                let mut stop = None;
+                for &(t, p) in &rows {
+                    let dt = previous.map_or(0.0024, |prev: f64| t - prev);
+                    if paced && previous.is_some() && dt < SERVO_PERIOD.as_secs_f64() {
+                        continue;
+                    }
+                    previous = Some(t);
+                    let out = c.tick(&input(t, p, dt)).unwrap();
+                    if out.stop.is_some() {
+                        stop = out.stop;
+                        break;
+                    }
+                }
+                if paced {
+                    assert_eq!(stop, None, "channel {channel}: resampled short trace");
+                } else {
+                    assert_eq!(
+                        stop,
+                        Some(StopReason::Speed),
+                        "channel {channel}: original trace"
+                    );
+                }
+            }
+        }
+        // These short replays do not assert that a physical two-second trial passes.
+    }
 
     fn run_liveness(e: &mut Engine<SimHw>, channel: usize) {
         e.handle(Command::Start(StepRequest::Liveness { channel }));
