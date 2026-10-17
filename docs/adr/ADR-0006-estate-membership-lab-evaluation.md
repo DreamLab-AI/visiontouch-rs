@@ -54,4 +54,4 @@ ADR in both ledgers.
 `AGENTS.md` and `README.md` state the posture. The VisionFlow canon carries
 ADR-2017, the roster row, the repository-map row, the website card and the
 diagrams area `docs/diagrams/visiontouch-rs` (VT-01 to VT-07) at VisionFlow
-commit d29c2ac8117b42d564e1f18e8358916c0b1a12fe.
+commit 1e3bdd0 (re-stamped at fee91eb).
