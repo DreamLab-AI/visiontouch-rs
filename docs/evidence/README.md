@@ -49,3 +49,12 @@ verification session here; a command value never counts (AGENTS.md rule 4).
 |---|---|---|
 | `input-only-sweep-20261016/` | Input-only workspace sweep, 31,271 samples, never armed | P-0044 |
 | `owner-photos-20261016.zip` | Three owner photographs of the unit | P-0043 |
+
+## Owner photographs
+
+`owner-photos-20261016.zip` holds three photographs of the owner's unit taken on
+2026-10-16 (P-0040 row family). They show the base name plate and a motor
+part-number label. Those are referential identification of lawfully owned
+hardware, the same facts `docs/hardware/identification.md` records, and are not
+vendor software artefacts under `docs/clean-room/POLICY.md` rule 5. Reviewed
+2026-10-17; kept.
