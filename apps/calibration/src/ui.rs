@@ -193,6 +193,7 @@ fn left_panel(app: &mut App, ctx: &egui::Context) {
                 });
                 card(ui, "04 / REGISTER THE RESET POSE", |ui| {
                     ui.label("Arm level and square to the base front, far arm plumb. Hold still, then register.");
+                    ui.label("Reset means this physical arm pose, not the middle of the working volume or the desk rest position.");
                     ui.horizontal(|ui| {
                         if ui.add_enabled(app.snapshot.connected && !busy, egui::Button::new("Register reset pose")).clicked() {
                             app.send(Command::RegisterReset);
@@ -200,6 +201,12 @@ fn left_panel(app: &mut App, ctx: &egui::Context) {
                         ui.label(tri(Some(app.snapshot.registered).filter(|r| *r)));
                     });
                     let reg = app.snapshot.registered && !busy;
+                    if let Some(p) = app.snapshot.position {
+                        ui.label(RichText::new("RESET REFERENCE: white box in the 3D view").strong());
+                        metric(ui, "distance to reset (model)", format!("{:.1} mm", norm(p) * 1e3));
+                        metric(ui, "offset X / Y / Z mm", mm3(p));
+                        ui.label("Move away, then reproduce the physical reset pose before capturing. Do not steer to the screen marker to pass the repeatability check.");
+                    }
                     ui.horizontal(|ui| {
                         if ui.add_enabled(reg, egui::Button::new("Capture return to reset")).clicked() {
                             app.send(Command::CaptureStill(Mark::ReturnToReset));
@@ -419,7 +426,11 @@ fn right_panel(app: &mut App, ctx: &egui::Context) -> bool {
                 });
                 card(ui, "LIVE", |ui| {
                     match s.position {
-                        Some(p) => metric(ui, "position mm", mm3(p)),
+                        Some(p) => {
+                            metric(ui, "position mm", mm3(p));
+                            metric(ui, "distance to reset mm", format!("{:.1}", norm(p) * 1e3));
+                            ui.label(RichText::new("White box: saved reset reference. Distances are model values.").size(11.).color(MUTED));
+                        }
                         None => {
                             ui.label(RichText::new("UNREGISTERED").strong().color(AMBER));
                             metric(ui, "display mm", mm3(s.unregistered_position));

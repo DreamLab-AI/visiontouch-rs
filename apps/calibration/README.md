@@ -19,6 +19,13 @@ scripts/run-calibration --help
 `--demo`, `--smoke-test` and `--help` never open hardware and do not invoke the
 port-access helper. Connecting never enables motor output.
 
+The saved reset reference is a white wire box in the 3D view, with a line to the
+live pen and a model distance readout in the registration and Live panels. The
+box is a visibility aid, not a tolerance region. Reset is the specified physical
+arm pose, not the centre of the working volume. For a return check, reproduce
+that physical pose independently of the display; steering to the marker does
+not establish physical repeatability. Reconnecting requires registration again.
+
 ## Session unlock ladder
 
 Nothing persists across connections: a reconnect forgets every verdict. A refused

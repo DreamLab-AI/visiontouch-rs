@@ -162,6 +162,12 @@ pub fn draw(s: &Snapshot, camera: &Camera3D) {
     };
     if reg.is_some() {
         arm_lines([0.; 3], Color::new(0.46, 0.91, 0.79, 0.28));
+        // Fixed display reference, deliberately larger than the return tolerance.
+        // Its size must not be read as an acceptance region.
+        draw_cube_wires(Vec3::ZERO, vec3(0.5, 0.5, 0.5), WHITE);
+        if let Some(p) = s.position {
+            draw_line_3d(Vec3::ZERO, pt(p), WHITE);
+        }
     }
     if s.connected {
         let color = if reg.is_some() {
