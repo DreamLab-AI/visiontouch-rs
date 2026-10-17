@@ -7,7 +7,7 @@ implementation_status: complete
 activation_status: live
 supersedes: []
 superseded_by: []
-verified_commit: e6f9d018f1ee88bd4db315937c9d66a3b95d1818
+verified_commit: 5e658b8e02f094f022eb7268b766489a9c2b0206
 verified_paths: [crates/device/src/lib.rs, apps/calibration/src/registration.rs, apps/calibration/src/arm.rs]
 owner: jjohare
 review_trigger: an OWNER ruler or repeatability record outside the acceptance band, or a physical measurement of the link lengths

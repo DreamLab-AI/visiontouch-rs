@@ -7,7 +7,7 @@ implementation_status: complete
 activation_status: live
 supersedes: []
 superseded_by: []
-verified_commit: e6f9d018f1ee88bd4db315937c9d66a3b95d1818
+verified_commit: 5e658b8e02f094f022eb7268b766489a9c2b0206
 verified_paths: [scripts/quality-gate.sh, scripts/adr-index-gen.cjs, .github/workflows/ci.yml, AGENTS.md]
 owner: jjohare
 review_trigger: a gate that cannot run on GitHub-hosted runners, or a change to the estate ADR status contract

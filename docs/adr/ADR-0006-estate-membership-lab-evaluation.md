@@ -7,7 +7,7 @@ implementation_status: complete
 activation_status: live
 supersedes: []
 superseded_by: []
-verified_commit: e6f9d018f1ee88bd4db315937c9d66a3b95d1818
+verified_commit: 5e658b8e02f094f022eb7268b766489a9c2b0206
 verified_paths: [AGENTS.md, README.md, docs/legal/POSITION.md]
 owner: jjohare
 review_trigger: any intent to publish the repository, distribute software, demonstrate outside the lab, or begin the VisionClaw integration
