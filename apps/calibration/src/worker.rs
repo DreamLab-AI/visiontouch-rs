@@ -180,6 +180,8 @@ pub struct LastResult {
     pub verdict: String,
     /// Ended as intended.
     pub normal: bool,
+    /// Actual duration of the finished attempt, seconds.
+    pub duration_s: f64,
 }
 
 /// Everything the interface needs, copied out of the engine.
@@ -966,6 +968,7 @@ impl<H: Hardware> Engine<H> {
         };
         self.awaiting = entry.map(|e| (id, e));
         self.last_result = Some(LastResult {
+            duration_s,
             attempt_id: id,
             label: request.label(),
             reason: reason.name().into(),

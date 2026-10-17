@@ -7,6 +7,7 @@ mod arm;
 mod controller;
 mod coverage;
 mod evidence;
+mod onboarding;
 mod protocol;
 mod registration;
 mod scene;
@@ -46,6 +47,7 @@ pub struct App {
     pub backend: Backend,
     pub snapshot: Snapshot,
     pub forms: ui::Forms,
+    pub guide: onboarding::Guide,
     pub orbit: scene::Orbit,
     pub held: bool,
     pub hold_since: Option<Instant>,
@@ -73,6 +75,7 @@ impl App {
             backend,
             snapshot: Snapshot::default(),
             forms: ui::Forms::default(),
+            guide: onboarding::Guide::default(),
             orbit: scene::Orbit::default(),
             held: false,
             hold_since: None,
@@ -169,6 +172,12 @@ impl App {
             self.notice = why;
         } else {
             self.pending = Some(req);
+            // A key already held while preparing is not consent for a new attempt.
+            // Require release and a fresh hold before dispatching the request.
+            if self.held {
+                self.blocked = true;
+                self.hold_since = None;
+            }
             if !self.held {
                 self.notice =
                     "Hold the key (Space or the hold button) to begin; release to stop.".into();
@@ -320,4 +329,32 @@ async fn graphical(demo: bool, no_device: bool) {
     }
     app.stop();
     drop(app); // Worker::drop clears the hold, sends Quit, disarms and joins.
+}
+
+#[cfg(test)]
+mod interaction_tests {
+    use super::*;
+
+    #[test]
+    fn preparing_while_space_is_down_requires_release_and_a_new_hold() {
+        let mut app = App::new(true, false);
+        app.snapshot.session = protocol::Session::connected();
+        app.held = true;
+        app.hold_since = Some(Instant::now() - Duration::from_secs(1));
+        app.request(StepRequest::Liveness { channel: 0 });
+        app.hold(true);
+        assert!(!app.held);
+        assert!(app.pending.is_some());
+        app.hold(false);
+        app.hold(true);
+        assert!(app.held);
+        assert!(
+            app.pending.is_some(),
+            "new hold must complete its own dwell"
+        );
+        app.stop();
+        assert!(app.pending.is_none(), "navigation/Stop cancels preparation");
+        app.hold(true);
+        assert!(!app.held, "Stop must not restart under a held key");
+    }
 }

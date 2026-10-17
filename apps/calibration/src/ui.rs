@@ -612,8 +612,9 @@ fn entry_card(app: &mut App, ui: &mut egui::Ui, s: &crate::worker::Snapshot) {
 
 /// Lay out every panel and the viewport overlay.
 pub fn interface(app: &mut App, ctx: &egui::Context) -> Frame {
+    app.guide.sync(&app.snapshot);
     egui::TopBottomPanel::top("header")
-        .exact_height(64.)
+        .exact_height(98.)
         .frame(
             egui::Frame::new()
                 .fill(PANEL)
@@ -624,9 +625,11 @@ pub fn interface(app: &mut App, ctx: &egui::Context) -> Frame {
                 ui.vertical(|ui| {
                     ui.label(RichText::new("CALIBRATION STUDIO").size(20.).strong());
                     ui.label(
-                        RichText::new("PHANToM 1.0A · register, pulse, load, measure")
-                            .size(11.)
-                            .color(MUTED),
+                        RichText::new(
+                            "Understand the arm. Establish a reference. Measure its response.",
+                        )
+                        .size(11.)
+                        .color(MUTED),
                     );
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -650,17 +653,50 @@ pub fn interface(app: &mut App, ctx: &egui::Context) -> Frame {
                     }
                 });
             });
+            ui.horizontal(|ui| {
+                let mut bench = app.guide.bench;
+                ui.selectable_value(&mut bench, false, "Guided setup");
+                ui.selectable_value(&mut bench, true, "Measurement bench");
+                if bench != app.guide.bench {
+                    app.stop();
+                    app.guide.bench = bench;
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .button(RichText::new("STOP / Esc").strong().color(RED))
+                        .clicked()
+                    {
+                        app.stop();
+                    }
+                });
+            });
         });
     egui::TopBottomPanel::bottom("status")
         .min_height(44.)
         .show(ctx, |ui| {
-            ui.label(RichText::new(&app.snapshot.status).size(12.));
+            let status =
+                if !app.guide.bench && app.snapshot.status.starts_with("Reset pose registered.") {
+                    "Reference saved. Continue with the current guided task."
+                } else {
+                    &app.snapshot.status
+                };
+            let status = if app.guide.bench {
+                status.to_owned()
+            } else {
+                status.replace(" Enter your reading below.", "")
+            };
+            ui.label(RichText::new(status).size(12.));
             if !app.notice.is_empty() {
                 ui.label(RichText::new(&app.notice).size(11.).color(AMBER));
             }
         });
-    left_panel(app, ctx);
-    let hold_button = right_panel(app, ctx);
+    let hold_button = if app.guide.bench {
+        left_panel(app, ctx);
+        right_panel(app, ctx)
+    } else {
+        crate::onboarding::panel(app, ctx);
+        false
+    };
     let r = ctx.available_rect();
     let rect = Rect::new(r.min.x, r.min.y, r.width().max(1.), r.height().max(1.));
     let p = ctx.layer_painter(egui::LayerId::new(
@@ -670,7 +706,7 @@ pub fn interface(app: &mut App, ctx: &egui::Context) -> Frame {
     let title = app
         .snapshot
         .active
-        .map_or("Idle".to_string(), |r| r.label());
+        .map_or("Live arm view".to_string(), |r| r.label());
     p.text(
         egui::pos2(rect.x + 22., rect.y + 18.),
         egui::Align2::LEFT_TOP,
@@ -681,15 +717,9 @@ pub fn interface(app: &mut App, ctx: &egui::Context) -> Frame {
     let (sub, color) = if !app.snapshot.connected {
         ("NOT CONNECTED", AMBER)
     } else if !app.snapshot.registered {
-        (
-            "UNREGISTERED · power-on counts, display only, no force possible",
-            AMBER,
-        )
+        ("No saved reference · approximate pose", AMBER)
     } else {
-        (
-            "REGISTERED · bright arm live, faint arm is the reset pose",
-            MUTED,
-        )
+        ("Bright arm: live · white box: saved reference", MUTED)
     };
     p.text(
         egui::pos2(rect.x + 22., rect.y + 48.),

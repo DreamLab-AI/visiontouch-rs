@@ -84,3 +84,18 @@ Only `worker` touches `visiontouch_device::Device`; the rest is hardware-free an
 cargo test -p visiontouch-studio
 cargo clippy -p visiontouch-studio --all-targets -- -D warnings
 ```
+
+## Guided setup
+
+The default view is a six-stage guide: observe input, save the illustrated reset
+pose, check it without moving, check a physical return, record one motor response
+at a time, then hand over to the measurement bench. The view leaves most of the
+window for the arm and keeps output state and Stop visible. No force gauge is
+required for onboarding; measured force remains a later bench task.
+
+Only worker-acknowledged captures advance the reference checks. Changing the
+reference resets guide progress. A stopped motor check has its own explanation
+and observations attach to that attempt automatically; a stop does not diagnose
+a failed motor. The guide offers a retry only for a released hold, not repeated
+speed or travel stops. Switching views cancels any prepared test. The guide uses
+the existing motor plans and interlocks and does not establish delivered force.
