@@ -1,8 +1,9 @@
 //! Short, bounded check on the owner's unit. Default commands zero only.
-use haptics_device::{Device, Wrench};
+//! Hold the arm at its reset pose at start: that pose is registered as the origin.
 use std::time::{Duration, Instant};
+use visiontouch_device::{Demand, Device};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    haptics_device::shutdown::install()?;
+    visiontouch_device::shutdown::install()?;
     let force: f64 = std::env::args()
         .nth(1)
         .map(|s| s.parse())
@@ -12,26 +13,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("check force must be finite and within ±0.1 N".into());
     }
     let mut device = Device::connect("/dev/parport0")?;
+    device.sample()?;
+    device.register_reset()?;
     device.enable_feedback()?;
     let start = Instant::now();
     let mut samples = 0;
     let mut peak = 0_f64;
-    while start.elapsed() < Duration::from_millis(400) && !haptics_device::shutdown::requested() {
+    while start.elapsed() < Duration::from_millis(400) && !visiontouch_device::shutdown::requested()
+    {
         let now = Instant::now();
         let y = if start.elapsed() < Duration::from_millis(200) {
             force
         } else {
             0.
         };
-        device.request(
-            Wrench {
-                force: [0., y, 0.],
-                torque: [0.; 3],
-            },
-            now,
-        )?;
+        device.request(Demand::Force([0., y, 0.]), now)?;
         device.sample()?;
-        peak = peak.max(device.guard.applied_force[1].abs());
+        peak = peak.max(device.guard.telemetry().applied_force[1].abs());
         samples += 1;
         std::thread::sleep(Duration::from_millis(2));
     }

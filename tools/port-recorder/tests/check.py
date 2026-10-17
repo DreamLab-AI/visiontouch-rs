@@ -8,7 +8,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[3]
 LIBRARY = ROOT / "target/debug/libport_capture.so"
-subprocess.run([str(ROOT / "tools/build-recorder")], check=True)
+subprocess.run([str(ROOT / "scripts/build-recorder")], check=True)
 
 with tempfile.TemporaryDirectory(prefix="haptics-recorder-") as directory:
     work = Path(directory)

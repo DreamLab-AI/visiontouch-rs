@@ -13,7 +13,7 @@ fn main() -> ExitCode {
         eprintln!("Usage: port-probe [DEVICE]");
         return ExitCode::FAILURE;
     }
-    match haptics_hal::query_capabilities(&path) {
+    match visiontouch_hal::query_capabilities(&path) {
         Ok(caps) => {
             println!(
                 "{}: host modes 0x{:08x}: {}",

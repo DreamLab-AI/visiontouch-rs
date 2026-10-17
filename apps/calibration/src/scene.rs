@@ -1,12 +1,21 @@
 //! View-only rendering. All hardware and servo work belongs to `worker`.
-use crate::{
-    model::*,
-    worker::{Snapshot, Test},
-};
-use haptics_effects::Kind;
+//!
+//! One scene unit is 50 mm, so the 140 mm links are 2.8 units long.
+use crate::arm;
+use crate::protocol::StepRequest;
+use crate::worker::Snapshot;
 use macroquad::prelude::*;
-use std::collections::VecDeque;
+use visiontouch_effects::Kind;
+use visiontouch_effects::math::{V, norm};
 
+/// Scene units per metre.
+pub const SCALE: f32 = 20.;
+/// Most coverage points drawn per frame.
+const MAX_DRAWN_CELLS: usize = 5000;
+/// Arrow length per newton, in metres.
+const ARROW_M_PER_N: f32 = 0.06;
+
+/// Orbit camera state.
 pub struct Orbit {
     pub yaw: f32,
     pub elevation: f32,
@@ -15,13 +24,14 @@ pub struct Orbit {
 impl Default for Orbit {
     fn default() -> Self {
         Self {
-            yaw: 0.55,
-            elevation: 0.4,
-            distance: 13.5,
+            yaw: 0.7,
+            elevation: 0.35,
+            distance: 14.,
         }
     }
 }
 impl Orbit {
+    /// Right drag orbits; the wheel zooms unless Shift is held.
     pub fn input(&mut self, rect: Rect, previous: Vec2) {
         let p = Vec2::from(mouse_position());
         if !rect.contains(p) {
@@ -33,17 +43,20 @@ impl Orbit {
             self.elevation = (self.elevation + d.y * 0.007).clamp(-0.2, 1.4);
         }
         if !is_key_down(KeyCode::LeftShift) {
-            self.distance = (self.distance * (-mouse_wheel().1 * 0.09).exp()).clamp(6., 30.);
+            self.distance = (self.distance * (-mouse_wheel().1 * 0.09).exp()).clamp(5., 30.);
         }
     }
+    /// The camera for a viewport.
     pub fn camera(&self, r: Rect) -> Camera3D {
+        let target = vec3(0., 1.4, -1.4);
         Camera3D {
-            position: vec3(
-                self.yaw.sin() * self.elevation.cos(),
-                self.elevation.sin(),
-                self.yaw.cos() * self.elevation.cos(),
-            ) * self.distance,
-            target: Vec3::ZERO,
+            position: target
+                + vec3(
+                    self.yaw.sin() * self.elevation.cos(),
+                    self.elevation.sin(),
+                    self.yaw.cos() * self.elevation.cos(),
+                ) * self.distance,
+            target,
             up: Vec3::Y,
             aspect: Some(r.w / r.h.max(1.)),
             fovy: 42_f32.to_radians(),
@@ -59,6 +72,8 @@ impl Orbit {
         }
     }
 }
+
+/// Project a scene point to screen space, if it is in front of the camera and inside `r`.
 pub fn project(camera: &Camera3D, r: Rect, p: Vec3) -> Option<Vec2> {
     let c = camera.matrix() * p.extend(1.);
     if c.w <= 0. {
@@ -68,332 +83,161 @@ pub fn project(camera: &Camera3D, r: Rect, p: Vec3) -> Option<Vec2> {
     let p = vec2(r.x + (n.x + 1.) * r.w * 0.5, r.y + (1. - n.y) * r.h * 0.5);
     r.contains(p).then_some(p)
 }
-pub fn scale(volume: &Volume) -> f32 {
-    let extent = volume
-        .bounds
-        .iter()
-        .flatten()
-        .copied()
-        .filter(|x| x.is_finite())
-        .fold(1_f64, |a, b| a.max(b.abs()));
-    (3.6 / extent) as f32
+
+/// Model metres to scene units.
+pub fn pt(v: V) -> Vec3 {
+    vec3(v[0] as f32, v[1] as f32, v[2] as f32) * SCALE
 }
-pub fn point(volume: &Volume, p: V) -> Vec3 {
-    let w = volume.working(p).unwrap_or_else(|| p.map(|x| x * 1000.));
-    vec3(w[0] as f32, w[1] as f32, w[2] as f32) * scale(volume)
-}
-fn ring(center: Vec3, radius: Vec3, axis: usize, color: Color) {
+
+fn ring(center: Vec3, radius: f32, axis: usize, color: Color) {
     let axes = [(1, 2), (0, 2), (0, 1)];
     let (a, b) = axes[axis];
-    for i in 0..64 {
-        let mut p = center;
-        let mut q = center;
-        let t = i as f32 * std::f32::consts::TAU / 64.;
-        let u = (i + 1) as f32 * std::f32::consts::TAU / 64.;
-        p[a] += radius[a] * t.cos();
-        p[b] += radius[b] * t.sin();
-        q[a] += radius[a] * u.cos();
-        q[b] += radius[b] * u.sin();
+    for i in 0..48 {
+        let (mut p, mut q) = (center, center);
+        let t = i as f32 * std::f32::consts::TAU / 48.;
+        let u = (i + 1) as f32 * std::f32::consts::TAU / 48.;
+        p[a] += radius * t.cos();
+        p[b] += radius * t.sin();
+        q[a] += radius * u.cos();
+        q[b] += radius * u.sin();
         draw_line_3d(p, q, color);
     }
 }
-fn ellipsoid(center: Vec3, radius: Vec3, color: Color, deform: Option<(Vec3, f32)>) {
-    let mut mesh = Mesh {
-        vertices: Vec::new(),
-        indices: Vec::new(),
-        texture: None,
-    };
-    for y in 0..=20 {
-        for x in 0..=32 {
-            let a = x as f32 * std::f32::consts::TAU / 32.;
-            let b = y as f32 * std::f32::consts::PI / 20.;
-            let n = vec3(a.cos() * b.sin(), b.cos(), a.sin() * b.sin());
-            let depression = deform.map_or(0., |(d, amount)| n.dot(d).max(0.).powi(8) * amount);
-            let p = center + n * radius * (1. - depression);
-            let shade = 0.35 + 0.65 * n.dot(vec3(-0.4, 0.8, 0.5).normalize()).max(0.);
-            mesh.vertices.push(Vertex::new2(
-                p,
-                Vec2::ZERO,
-                Color::new(color.r * shade, color.g * shade, color.b * shade, color.a),
-            ));
-            if y < 20 && x < 32 {
-                let i = (y * 33 + x) as u16;
-                mesh.indices
-                    .extend_from_slice(&[i, i + 1, i + 33, i + 1, i + 34, i + 33]);
-            }
-        }
-    }
-    draw_mesh(&mesh);
-}
 fn arrow(a: Vec3, b: Vec3, color: Color) {
     draw_line_3d(a, b, color);
-    let direction = (b - a).normalize_or_zero();
-    if direction.length_squared() > 0. {
-        let side = direction.cross(Vec3::Y).normalize_or_zero();
+    let d = (b - a).normalize_or_zero();
+    if d.length_squared() > 0. {
+        let side = d.cross(Vec3::Y).normalize_or_zero();
         let side = if side.length_squared() < 0.1 {
             Vec3::X
         } else {
             side
         };
-        draw_line_3d(b, b - direction * 0.15 + side * 0.08, color);
-        draw_line_3d(b, b - direction * 0.15 - side * 0.08, color);
+        draw_line_3d(b, b - d * 0.18 + side * 0.09, color);
+        draw_line_3d(b, b - d * 0.18 - side * 0.09, color);
     }
 }
-pub fn draw(
-    volume: &Volume,
-    s: &Snapshot,
-    test: Test,
-    trail: &VecDeque<V>,
-    camera: &Camera3D,
-    show_trail: bool,
-) {
+fn arm_lines(counts: [f64; 3], color: Color) {
+    for (a, b) in arm::segments(counts) {
+        draw_line_3d(pt(a), pt(b), color);
+    }
+}
+fn wire_cube(c: Vec3, h: f32, color: Color) {
+    let corner = |i: usize| {
+        c + vec3(
+            if i & 1 == 0 { -h } else { h },
+            if i & 2 == 0 { -h } else { h },
+            if i & 4 == 0 { -h } else { h },
+        )
+    };
+    for i in 0..8 {
+        for bit in [1, 2, 4] {
+            if i & bit == 0 {
+                draw_line_3d(corner(i), corner(i | bit), color);
+            }
+        }
+    }
+}
+
+/// Draw the registered arm, reset ghost, coverage, active effect, plane, proxy and force arrow.
+pub fn draw(s: &Snapshot, camera: &Camera3D) {
     set_camera(camera);
-    let k = scale(volume);
-    let lo = vec3(
-        volume.bounds[0][0] as f32,
-        volume.bounds[1][0] as f32,
-        volume.bounds[2][0] as f32,
-    ) * k;
-    let hi = vec3(
-        volume.bounds[0][1] as f32,
-        volume.bounds[1][1] as f32,
-        volume.bounds[2][1] as f32,
-    ) * k;
-    if lo.is_finite() && hi.is_finite() && lo.cmplt(hi).all() {
-        draw_cube_wires((lo + hi) * 0.5, hi - lo, Color::from_rgba(55, 77, 94, 255));
-        for i in 0..=10 {
-            let t = i as f32 / 10.;
-            draw_line_3d(
-                vec3(lo.x + (hi.x - lo.x) * t, lo.y, lo.z),
-                vec3(lo.x + (hi.x - lo.x) * t, lo.y, hi.z),
-                Color::from_rgba(30, 47, 60, 255),
-            );
-            draw_line_3d(
-                vec3(lo.x, lo.y, lo.z + (hi.z - lo.z) * t),
-                vec3(hi.x, lo.y, lo.z + (hi.z - lo.z) * t),
-                Color::from_rgba(30, 47, 60, 255),
+    draw_grid(
+        24,
+        1.,
+        Color::new(0.2, 0.3, 0.38, 0.9),
+        Color::new(0.12, 0.2, 0.27, 0.8),
+    );
+    for (axis, color) in [
+        (Vec3::X, Color::new(0.92, 0.44, 0.49, 1.)),
+        (Vec3::Y, Color::new(0.49, 0.86, 0.63, 1.)),
+        (Vec3::Z, Color::new(0.44, 0.65, 0.97, 1.)),
+    ] {
+        draw_line_3d(Vec3::ZERO, axis * 3.4, color);
+    }
+    let reg = s.registration;
+    let live: [f64; 3] = match reg {
+        Some(r) => std::array::from_fn(|i| (s.continuous[i] - r.reset_counts[i]) as f64),
+        None => std::array::from_fn(|i| s.continuous[i] as f64),
+    };
+    if reg.is_some() {
+        arm_lines([0.; 3], Color::new(0.46, 0.91, 0.79, 0.28));
+    }
+    if s.connected {
+        let color = if reg.is_some() {
+            Color::new(0.46, 0.91, 0.79, 1.)
+        } else {
+            Color::new(0.97, 0.77, 0.45, 1.)
+        };
+        arm_lines(live, color);
+        let tip = arm::pose(live).tip;
+        draw_sphere(pt(tip), 0.14, None, color);
+        let f = s.telemetry.applied_force;
+        if norm(f) > 1e-6 && reg.is_some() {
+            let capped = s.telemetry.force_capped || s.telemetry.dac_capped;
+            let c = if capped {
+                Color::new(0.97, 0.51, 0.54, 1.)
+            } else {
+                Color::new(1., 0.86, 0.4, 1.)
+            };
+            let tail = pt(tip);
+            arrow(
+                tail,
+                tail + vec3(f[0] as f32, f[1] as f32, f[2] as f32) * ARROW_M_PER_N * SCALE,
+                c,
             );
         }
     }
-    let colors = [
-        Color::from_rgba(234, 113, 126, 255),
-        Color::from_rgba(125, 220, 160, 255),
-        Color::from_rgba(113, 166, 247, 255),
-    ];
-    for (i, color) in colors.iter().enumerate() {
-        let mut end = Vec3::ZERO;
-        end[i] = 4.1;
-        arrow(Vec3::ZERO, end, *color);
+    if reg.is_some() && !s.coverage.is_empty() {
+        let step = (s.coverage.len() / MAX_DRAWN_CELLS).max(1);
+        for p in s.coverage.iter().step_by(step) {
+            let q = pt(*p);
+            draw_line_3d(
+                q,
+                q + vec3(0.03, 0.03, 0.03),
+                Color::new(0.4, 0.62, 0.9, 0.45),
+            );
+        }
     }
-    draw_sphere_wires(Vec3::ZERO, 0.12, None, Color::from_rgba(222, 234, 242, 255));
-    let centre_model = volume.zero().unwrap_or([0.; 3]);
-    let r = volume
-        .radius()
-        .clamp(0.0002, if s.sweep_mode { 0.02 } else { 0.1 });
-    let radius = vec3(
-        (point(volume, add(centre_model, [r, 0., 0.]))).x.abs(),
-        point(volume, add(centre_model, [0., r, 0.])).y.abs(),
-        point(volume, add(centre_model, [0., 0., r])).z.abs(),
-    );
-    if (!s.sweep_mode || s.approach_ready)
-        && let Test::Object(kind) = test
-    {
+    if let Some(StepRequest::Effect { kind }) = s.active {
+        let centre = pt(s.centre.unwrap_or([0.; 3]));
+        let r = 0.0225 * SCALE;
+        let c = Color::new(1., 0.86, 0.4, 0.9);
         match kind {
-            Kind::Cube => {
-                draw_cube(
-                    Vec3::ZERO,
-                    radius * 2.,
-                    None,
-                    Color::from_rgba(46, 95, 116, 255),
-                );
-                draw_cube_wires(
-                    Vec3::ZERO,
-                    radius * 2.005,
-                    Color::from_rgba(113, 213, 225, 255),
-                );
-            }
-            Kind::Water => {
-                ellipsoid(
-                    Vec3::ZERO,
-                    radius,
-                    Color::from_rgba(40, 104, 170, 110),
-                    None,
-                );
-                for i in 0..3 {
-                    ring(Vec3::ZERO, radius, i, Color::from_rgba(97, 180, 239, 190));
-                }
-                for y in -2..=2 {
-                    let y = y as f32 / 3.;
-                    let rr = (1. - y * y).sqrt();
-                    ring(
-                        vec3(0., radius.y * y, 0.),
-                        radius * vec3(rr, 1., rr),
-                        1,
-                        Color::from_rgba(58, 119, 171, 150),
-                    );
-                }
-            }
-            Kind::Balloon => {
-                if !s.frame.popped {
-                    let direction = point(volume, s.position).normalize_or_zero();
-                    ellipsoid(
-                        Vec3::ZERO,
-                        radius,
-                        Color::from_rgba(220, 94, 131, 255),
-                        Some((direction, s.frame.deformation as f32)),
-                    );
-                    draw_line_3d(
-                        vec3(0., -radius.y, 0.),
-                        vec3(0., -radius.y - 0.9, 0.),
-                        Color::from_rgba(176, 129, 153, 255),
-                    );
-                } else {
-                    for i in 0..12 {
-                        let a = i as f32 * std::f32::consts::TAU / 12.;
-                        let d = vec3(a.cos(), a.sin(), (a * 2.).sin() * 0.4);
-                        draw_line_3d(
-                            d * radius * 1.05,
-                            d * radius * 1.4,
-                            Color::from_rgba(237, 124, 156, 255),
-                        );
-                    }
+            Kind::Cube => wire_cube(centre, r, c),
+            Kind::Plane => {
+                for i in -4..=4 {
+                    let o = i as f32 * 0.5;
+                    draw_line_3d(centre + vec3(o, 0., -2.), centre + vec3(o, 0., 2.), c);
+                    draw_line_3d(centre + vec3(-2., 0., o), centre + vec3(2., 0., o), c);
                 }
             }
             Kind::Springs => {
-                let bodies = s.frame.bodies.map(|p| point(volume, add(centre_model, p)));
-                for i in 0..3 {
-                    for j in i + 1..3 {
-                        let d = bodies[j] - bodies[i];
-                        let side = d.cross(Vec3::Z).normalize_or_zero();
-                        let mut prev = bodies[i];
-                        for n in 1..=40 {
-                            let t = n as f32 / 40.;
-                            let p = bodies[i]
-                                + d * t
-                                + side * (t * std::f32::consts::TAU * 8.).sin() * 0.06;
-                            draw_line_3d(prev, p, Color::from_rgba(133, 151, 192, 255));
-                            prev = p;
-                        }
-                    }
-                    draw_line_3d(Vec3::ZERO, bodies[i], Color::from_rgba(63, 63, 92, 255));
-                    ellipsoid(bodies[i], radius * 0.28, colors[i], None);
-                }
-                ellipsoid(
-                    Vec3::ZERO,
-                    Vec3::splat(0.1),
-                    Color::from_rgba(245, 200, 112, 255),
-                    None,
-                );
-            }
-            Kind::Plane => {
-                draw_cube(
-                    vec3(0., -0.015, 0.),
-                    vec3(radius.x * 3., 0.03, radius.z * 3.),
-                    None,
-                    Color::from_rgba(74, 97, 130, 255),
-                );
-                draw_cube_wires(
-                    Vec3::ZERO,
-                    vec3(radius.x * 3., 0.01, radius.z * 3.),
-                    Color::from_rgba(132, 167, 219, 255),
-                );
-            }
-            Kind::Viscous => {
-                for x in -2..=2 {
-                    for y in -2..=2 {
-                        for z in -2..=2 {
-                            let p = radius * vec3(x as f32, y as f32, z as f32) * 0.6;
-                            draw_line_3d(
-                                p,
-                                p + vec3(0.08, 0.03, 0.1),
-                                Color::from_rgba(94, 113, 170, 255),
-                            );
-                        }
+                if let Some(f) = s.effect_frame {
+                    for b in f.bodies {
+                        draw_sphere(centre + pt(b), 0.12, None, c);
                     }
                 }
             }
-            Kind::Detents => {
-                for x in -2..=2 {
-                    for y in -2..=2 {
-                        for z in -2..=2 {
-                            draw_sphere_wires(
-                                radius * vec3(x as f32, y as f32, z as f32) * 0.6,
-                                0.045,
-                                None,
-                                Color::from_rgba(169, 133, 224, 255),
-                            );
-                        }
-                    }
+            Kind::Water | Kind::Balloon | Kind::Viscous | Kind::Detents => {
+                for axis in 0..3 {
+                    ring(centre, r * 2., axis, c);
                 }
             }
         }
-    }
-    for pair in s.return_route.windows(2) {
-        draw_line_3d(
-            point(volume, pair[0]),
-            point(volume, pair[1]),
-            Color::from_rgba(229, 194, 126, 255),
-        );
-    }
-    if let Some(review) = &s.sweep.path_review {
-        let start = point(volume, review.start_model_m);
-        let end = point(volume, review.zero_model_m);
-        draw_line_3d(start, end, Color::from_rgba(229, 194, 126, 255));
-        if let Some([from, to]) = review.first_gap_fraction {
-            draw_line_3d(
-                start.lerp(end, from as f32),
-                start.lerp(end, to as f32),
-                RED,
-            );
+        if let Some(p) = s.proxy {
+            draw_sphere(pt(p), 0.1, None, Color::new(1., 0.7, 0.3, 1.));
         }
     }
-    for sample in &s.sweep.points_model_m {
-        let p = point(volume, *sample);
-        let dy = vec3(0., 0.018, 0.);
-        draw_line_3d(p - dy, p + dy, Color::from_rgba(118, 231, 201, 190));
-    }
-    if show_trail {
-        let mut previous = None;
-        for (i, p) in trail.iter().enumerate() {
-            let p = point(volume, *p);
-            if let Some(prev) = previous {
-                draw_line_3d(
-                    prev,
-                    p,
-                    Color::new(
-                        0.24,
-                        0.65,
-                        0.58,
-                        0.2 + 0.6 * i as f32 / trail.len().max(1) as f32,
-                    ),
-                );
-            }
-            previous = Some(p);
-        }
-    }
-    if s.reference {
-        let pen = point(volume, s.position);
-        let target = point(volume, s.target);
-        draw_line_3d(
-            pen,
-            vec3(pen.x, lo.y, pen.z),
-            Color::from_rgba(59, 104, 105, 255),
-        );
-        ellipsoid(
-            pen,
-            Vec3::splat(0.085),
-            Color::from_rgba(124, 255, 218, 255),
-            None,
-        );
-        if s.active {
-            draw_sphere_wires(target, 0.13, None, Color::from_rgba(246, 201, 116, 255));
-            draw_line_3d(pen, target, Color::from_rgba(199, 165, 102, 255));
-            let force = s.force.map(|f| f as f32);
-            arrow(
-                pen,
-                pen + vec3(force[0], force[1], force[2]) * 8.,
-                Color::from_rgba(244, 143, 107, 255),
-            );
+    if s.active == Some(StepRequest::WallRamp)
+        && let Some(t) = s.target
+    {
+        let y = pt(t).y;
+        let c = Color::new(0.97, 0.51, 0.54, 0.8);
+        for i in -4..=4 {
+            let o = i as f32 * 0.6;
+            draw_line_3d(vec3(o, y, -2.4), vec3(o, y, 2.4), c);
+            draw_line_3d(vec3(-2.4, y, o), vec3(2.4, y, o), c);
         }
     }
     set_default_camera();

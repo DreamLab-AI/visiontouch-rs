@@ -20,7 +20,7 @@ after restarting; saved data cannot silently restore live authority.
 ## Latest continuation — acceptance audit
 
 The documentation turn was progress. The requirement-by-requirement audit is in
-`docs/calibration-acceptance.md`. Current checks pass: 60 Rust unit tests, three
+`docs/history/2026-10-16-calibration-acceptance.md`. Current checks pass: 60 Rust unit tests, three
 doctests, five viewer tests, formatting and six audio tests. The full goal remains
 unproven because delivered force, resistance and physical release have not been
 validated; the earlier weak-contact report remains unresolved. Exact legacy demo
@@ -76,8 +76,8 @@ completion, commits and push to main.
   teach a comfortable short route, then assess low-force response. Physical
   force calibration, resistance/overload release, thermal behaviour and precise
   arm geometry remain unresolved; tracing does not validate those quantities.
-- Offline launch: `tools/run-calibration --demo`; recorded 3D reconstruction:
-  `tools/run-workspace-viewer`. See app READMEs for controls and evidence limits.
+- Offline launch: `scripts/run-calibration --demo`; recorded 3D reconstruction:
+  `scripts/run-workspace-viewer`. See app READMEs for controls and evidence limits.
 
 ## Earlier continuation — sweep evidence and offline reconstruction
 
@@ -116,7 +116,7 @@ application held `/dev/parport0`; no powered tests were run after the input-only
 baseline. The owner resumed work after switching to tmux.
 
 - `apps/calibration` is the native guided calibration/demo app. Launch offline
-  with `tools/run-calibration --demo`; normal launch connects input-only.
+  with `scripts/run-calibration --demo`; normal launch connects input-only.
 - Capture bottom and six comfortable bounds, enter working coordinates, export
   calibration evidence with output off, then hold for a slow zero move or one of
   seven canonical scenes. Fresh captures are required on every connection.
@@ -126,7 +126,7 @@ baseline. The owner resumed work after switching to tmux.
   reconnection. Command-limit release is an independent software policy.
 - Attempts save demand, guarded output, exact motor offsets, timing, command-limit
   status and mapping evidence. Manual sound/surface-temperature observations and
-  external WAV paths can be attached. `tools/analyze-motor-audio` performs offline
+  external WAV paths can be attached. `tools/audio-analysis/analyze-motor-audio` performs offline
   descriptive spectral comparisons; it does not diagnose safe motor loading.
 - Workspace tests passed (44 unit tests after the additional rollover regression,
   plus two doc tests); audio checks passed (6); Clippy and native graphics smoke
@@ -151,7 +151,7 @@ response need investigation; the cause has not been established. Do not mark
 physical surface feedback as working or raise limits solely from packet success.
 
 
-- `crates/device` is the reusable `haptics-device` SDK: all six counters,
+- `crates/device` is the reusable `visiontouch-device` SDK: all six counters,
   reference Cartesian model/Jacobian, Wrench API, force guards and device lifecycle.
   HAL handles observed motor packets. No vendor runtime dependencies.
 - Native Rust motor-command transport is acknowledged. Zero and -0.1 N bounded
@@ -180,7 +180,7 @@ physical surface feedback as working or raise limits solely from packet success.
   no extra commands. This does not identify actual hardware; SDK rejects nonzero
   torque until that protocol is verified. Manufacturer has distinct force-only
   and force/torque variants. Do not conclude that the owner's small units are passive.
-- App running as transient user `mass-lab.service`, using `tools/with-port-access`,
+- App running as transient user `mass-lab.service`, using `scripts/with-port-access`,
   `--force-feedback` and capture path `pen-rotation-02.csv`. Force feedback enabled.
   Signal flags + joined worker handle graceful shutdown; SIGKILL is not covered.
   Workspace 1 currently has Foot on top, app and an Omarchy agent window below.
@@ -198,10 +198,10 @@ supersedes the physical-isolation blocker in the historical entries below.
 - Native EPP read stalls; actual diagnostic proves control changes 0x00 to 0x04.
   Linux's ECP/EPP callback sets INIT. Software EPP preserving the reference's low
   INIT yields successful initialization, force disable, encoder query and close.
-- Own Rust `haptics_hal::device::DeviceReader` implements a bounded observed
+- Own Rust `visiontouch_hal::device::DeviceReader` implements a bounded observed
   initialization prefix and 16-byte acquisition without vendor libraries or
   force-output packets. Six signed counters match SDK axis order.
-- `tools/with-port-access timeout -s KILL 10s target/debug/device-readout /dev/parport0 50`
+- `scripts/with-port-access timeout -s KILL 10s target/debug/device-readout /dev/parport0 50`
   prints CSV. Build with `cargo build -p device-readout` first.
 - Verified five packets under strace and 50 on an independent fresh connection;
   port owner is now none. No capture jobs are running. Five focused unit tests
@@ -234,7 +234,7 @@ Owner wants to revive the parallel-port device with a Rust/Linux stack and sugge
 
 ## Repositories and tools
 
-- `/home/john/Work/haptics-rust`: research-only starting point; retain clean-room policy, provenance, and spec-before-code discipline.
+- `/home/john/Work/visiontouch-rs`: research-only starting point; retain clean-room policy, provenance, and spec-before-code discipline.
 - **Reverse Engineer Anything (REA) is already downloaded/cloned at `/home/john/Work/rea`.** Correct upstream is https://github.com/morluto/rea (not morlutu). It is a sibling of this repository; do not download another copy. Cloned main; no setup or dependency installation performed. Read `/home/john/Work/rea/AGENTS.md` before changes or setup.
 - GitHub CLI login completed as **jjohare**; both repositories were cloned successfully. No credentials belong in these notes.
 - Node/npm found on PATH under mise Node 26.8.2. `java`, `ghidra`, `strace`, and `qemu-system-i386` were not found on PATH, and package queries did not find the checked packages. Recheck before installing.
@@ -242,7 +242,7 @@ Owner wants to revive the parallel-port device with a Rust/Linux stack and sugge
 
 ## Driver acquisition findings and limitations
 
-Official starting point: https://www.3dsystems.com/haptics-devices/openhaptics
+Official starting point: https://www.3dsystems.com/visiontouch-devices/openhaptics
 
 The current vendor page lists **Phantom Device Driver 5.1.7 or above** for parallel-only Premium 1.5 variants on both Windows and Linux. This is a useful package family to investigate, not confirmed compatibility for the owner's 1.0A. We have not established that Win98/NT4 is necessary.
 
@@ -302,7 +302,7 @@ Notes are local changes; no commit or push was requested or performed. Review `g
 ## Port access resolved for agent-launched tools
 
 - Owner explicitly authorized passwordless sudo to fix access. `sudo -n -u john -- COMMAND` starts commands as UID 1000 with current supplementary groups, including `lp`; read/write permission checks on `/dev/parport0` pass.
-- Added executable `tools/with-port-access COMMAND [ARG ...]`: executes directly when access is available, otherwise re-executes through passwordless sudo as the invoking ordinary user to refresh groups. Use this launcher for port tooling from the stale app session. Ordinary commands in the original app process still retain its old groups.
+- Added executable `scripts/with-port-access COMMAND [ARG ...]`: executes directly when access is available, otherwise re-executes through passwordless sudo as the invoking ordinary user to refresh groups. Use this launcher for port tooling from the stale app session. Ordinary commands in the original app process still retain its old groups.
 - Node ownership/mode remain `root:lp` 0660. No group, udev, or global permission changes were needed. No reboot is required to use the launcher.
 - Verified launcher syntax, effective UID/groups and read/write permissions without opening the device or issuing ioctls/transfers. This verifies filesystem access, not EPP operation.
 
@@ -316,14 +316,14 @@ the actual unit in Rust. **Not complete**: no successful unit communication yet.
 - Installed Rust 1.98.1, strace 7.0, 7zip, openmotif, libxp, libxpm, Xvfb,
   xdotool and xwininfo through Omarchy. Ubuntu compatibility packages only
   extracted into ignored vendor-original/runtime; no vendor installers run.
-- Added a dependency-free Rust workspace with haptics-hal and port-probe. Host
+- Added a dependency-free Rust workspace with visiontouch-hal and port-probe. Host
   query succeeds as John with 0x4f capabilities. Strace proves no claim or
   negotiation. This is not peripheral communication. No automated unit tests yet.
 - Legacy SDK/library load and configuration generation were verified in an
   offline bubblewrap sandbox. Mock-port trace shows ppdev claim/mode attempts;
   all fail ENOTTY as expected. No hardware exposed to vendor code. The GUI sandbox
   and its virtual display have been stopped; no pending downloads/processes.
-- `tools/vendor-sandbox` recreates the offline boundary; tested for absence of
+- `scripts/vendor-sandbox` recreates the offline boundary; tested for absence of
   host port nodes. Existing ignored harness is vendor-original/blackbox-init.py.
 - Owner was asked how power is supplied and whether amplifier power can be
   isolated from interface power; reply pending. No live initialization until this
@@ -340,7 +340,7 @@ host Rust query verified). This turn also makes progress; the objective remains
 active and actual unit communication remains unproven.
 
 - Added tools/port-recorder: Rust snapshot/JSON implementation with a small C and
-  x86-64 assembly preload shim, plus tools/build-recorder and integration checks.
+  x86-64 assembly preload shim, plus scripts/build-recorder and integration checks.
   Specification was written first in docs/spec/01-call-capture.md; P-0014–P-0016
   record provenance. Dependencies are pinned by Cargo.lock.
 - Tests pass for unmodified results/errno, binary read/write buffers, ioctl input

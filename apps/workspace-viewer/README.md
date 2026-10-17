@@ -5,7 +5,7 @@ port, motor, browser-device or live-control interface. The included owner sweep
 is the 31,271-sample input-only recording from 2026-10-16. The final resting pose
 was described by the owner as bottom dead centre "ish", not an exact origin.
 
-From the repository root, `tools/run-workspace-viewer` installs locked dependencies
+From the repository root, `scripts/run-workspace-viewer` installs locked dependencies
 when needed, extracts the three owner photographs from the uploaded ZIP, and
 starts the loopback-only server. Or run manually:
 
@@ -21,7 +21,7 @@ service is required. `data/latest.json` takes priority over the bundled evidence
 example. To convert another input-only recorder file from the repository root:
 
 ```sh
-tools/import-workspace-recording path/to/input.csv
+scripts/import-workspace-recording path/to/input.csv
 # Also accepts a gzip-compressed CSV.
 ```
 
@@ -34,7 +34,7 @@ remains the authoritative source. Replay uses continuous encoder counts.
 The model contains a base, yaw pivot, upright frame, approximate drive housings,
 paired links, distal link, orthogonal gimbal housings and stylus. The owner photos
 supply visible topology. The 139.7 mm link defaults and angle convention come from
-the existing reference model in `haptics-device`; changing lengths displays model
+the existing reference model in `visiontouch-device`; changing lengths displays model
 disagreement, not an independently measured fit. Cosmetic dimensions, cable
 routing, joint offsets and motor assignments remain unverified. The last three
 encoder channels are preserved but are not assigned wrist angles without evidence.
@@ -50,7 +50,7 @@ The model's tool point is the SDK reference point, not a calibrated stylus tip.
   zoom, change link lengths, and export the visible reconstruction as GLB.
 
 Photos are served from the optional local `photos` link. To recreate it from the
-owner-uploaded root ZIP, extract its three JPGs under `captures/device-photos/`
+owner archive `docs/evidence/owner-photos-20261016.zip`, extract its three JPGs under `captures/device-photos/`
 and link that directory here as `photos`. No photographs or SDK assets are
 embedded in generated geometry. Missing photos do not prevent replay.
 

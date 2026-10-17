@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/hal", "crates/device", "crates/effects", "crates/workspace", "tools/port-probe", "tools/port-recorder", "tools/device-readout", "apps/mass-lab", "apps/calibration"]
+members = ["crates/hal", "crates/device", "crates/effects", "tools/port-probe", "tools/port-recorder", "tools/device-readout", "apps/mass-lab", "apps/calibration"]
 resolver = "3"
 
 [workspace.package]

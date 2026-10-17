@@ -7,7 +7,7 @@ It forwards calls; using it with live vendor software can affect the device.
 Build and verify without hardware:
 
 ```sh
-tools/build-recorder
+scripts/build-recorder
 python3 tools/port-recorder/tests/check.py
 ```
 
@@ -23,7 +23,7 @@ For the query-only Rust host tool:
 ```sh
 cargo build -p port-probe
 mkdir -p vendor-original
-tools/with-port-access env \
+scripts/with-port-access env \
   LD_PRELOAD="$PWD/target/debug/libport_capture.so" \
   PORT_CAPTURE_TARGET=/dev/parport0 \
   PORT_CAPTURE_PREFIX="$PWD/vendor-original/host-query" \
@@ -52,6 +52,6 @@ hidden libc entry points, or calls in other loader namespaces. It alters timing
 and records only completed calls. Capture completeness requires evidence from
 the specific run, not merely a successful recorder test.
 
-Vendor experiments belong in `tools/vendor-sandbox` until the hardware interlock
+Vendor experiments belong in `scripts/vendor-sandbox` until the hardware interlock
 is understood. The current ignored `vendor-original/offline-record.sh` reproduces
 the mock-file experiment. Its expected outcome is failed initialization.

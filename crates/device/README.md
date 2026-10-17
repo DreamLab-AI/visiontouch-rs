@@ -1,57 +1,88 @@
-# haptics-device
+# visiontouch-device
 
-Reusable Rust SDK for the owner's identified parallel-port unit. `haptics-hal`
-handles the port and packet lifecycle; this crate handles device state, a
-reference kinematic model, force transforms and bounded requests. Mass Lab owns
-world physics and submits the equal/opposite spring-coupling reaction.
+Rust SDK for the owner's identified parallel-port unit. `visiontouch-hal` handles the
+port and packet lifecycle; this crate handles device state, a reference kinematic
+model, reset-pose registration, and a guarded force output.
 
-- Six raw and accumulated encoder channels, including pen/wrist inputs; button.
-- Reference Cartesian position in metres and an analytic force Jacobian.
-- `Wrench { force, torque }` interface; nonzero torque is rejected until the
-  possible wrist actuators and their output protocol are verified.
-- Explicit zero-handshake arming, 0.5 N vector cap, 2 N/s slew cap, 96-count
-  actuator-offset cap, and immediate zero for stale (>25 ms) or zero requests.
-- Non-finite requests disarm. Read/acknowledgement failures end the force session.
-- Close/drop attempts reference zero/shutdown packets and releases the port.
+**Commands are model values. Delivered force is unmeasured.** Every "newton" here is
+a model command derived from a reference kinematic model and fixed gains. No delivered
+force has been established; only an attended session with a gauge or mass can do
+that (`docs/spec/14-force-calibration.md`). Wrist and pen actuation is unsupported:
+there is no torque term anywhere in the API.
 
-Call `Device::sample()` on a dedicated worker continuously; it reads encoders,
-checks acknowledgement, evaluates the force guard and sends the next output.
-Submit timestamped requests from the application using `Device::request()`.
-`enable_feedback()` performs the zero-only handshake before arming. `connect()`
-alone does not enable motor output. `EncoderState` is usable without hardware.
-The optional `shutdown::install()` installs SIGINT/SIGTERM flags; the application
-must check `shutdown::requested()` in its worker and join it before exiting.
+## What it provides
 
-The model matches black-box reference queries, not a measured physical force
-calibration. A force request in newtons is a model-derived command, not a load-cell
-measurement. Hardware watchdog behavior, hard real-time timing, wrist actuation,
-and physical calibration remain unverified. Software cannot guarantee shutdown
-if the process is forcibly killed or the kernel stops scheduling it.
+- Six raw and unwrapped encoder channels, including pen/wrist inputs, and the button.
+- **Registration**: `Device::register_reset()` makes the current pose the model origin.
+  Registered counts, position and Jacobian are the only frame the guard uses.
+  **Registration precedes any Cartesian demand**: `Demand::Force` is refused while
+  unregistered. A reconnect is a new `Device`, so registration never survives it.
+  The raw `Demand::Channels` liveness test does not need registration.
+- A guard with a software deadman, force-vector cap, slew limit and uniform DAC scaling.
 
-```sh
-cargo test -p haptics-device -p haptics-hal
-cargo build -p haptics-device --example feedback-check
-# Stop/disconnect Mass Lab before opening the same port.
-tools/with-port-access target/debug/examples/feedback-check
+## Envelope
+
+| | Default (`ForceLimits::default()`) | Ceiling |
+|---|---|---|
+| Force vector | 0.5 N (`DEFAULT_FORCE_N`) | 2 N (`MAX_FORCE_N`) |
+| Per-channel DAC offset | 96 counts (`DEFAULT_DAC_OFFSET`) | 300 counts (`MAX_DAC_OFFSET`) |
+| Slew | 100 N/s | 100 N/s (`MAX_SLEW_N_S`) |
+
+The default is the envelope armed live in P-0030. Applications can only lower the
+ceilings; raising one needs an ADR (AGENTS.md rule 5). The 300-count ceiling is the
+HAL transport clamp (`visiontouch_hal::device::MAX_MOTOR_OFFSET`), 14.7% of the 2047-count
+half-span. Content without a fixed dwell stays at or below `CONTINUOUS_FORCE_N`
+(1 N); the raw channel test is capped at 96 counts. A request older than 25 ms, or a
+servo gap over 25 ms, yields zero immediately, and a zero demand is never slewed.
+
+When a channel would exceed its DAC limit the *whole* force vector is scaled, so the
+output direction is preserved and a wall gains no tangential force. There is no
+latched release trip: limits cap, they never disarm. `Telemetry` (from
+`ForceGuard::telemetry()`) reports `force_capped`, `dac_capped`, `slewing` and
+`expired`, plus what was applied and sent.
+
+## Use
+
+Call `Device::sample()` on a dedicated worker continuously: it reads encoders,
+checks acknowledgement, evaluates the guard and sends the output. Every `sample`
+error is a transport fault; close and reconnect. `Device::request(Demand, Instant)`
+returns `RequestError::Rejected` (non-finite, unregistered, not armed; output was shut
+down, the connection is usable) or `RequestError::ShutdownFailed` (reconnect). A
+servo loop that recomputes its demand from the sample it just read stamps it `now`;
+never refresh the stamp of a request that was not recomputed.
+
+```rust,no_run
+use visiontouch_device::{Demand, Device};
+use std::time::Instant;
+let mut device = Device::connect("/dev/parport0")?;
+device.sample()?;
+device.register_reset().map_err(std::io::Error::other)?; // arm at its reset pose
+device.enable_feedback()?; // zero-only handshake, then arm
+device.request(Demand::Force([0.; 3]), Instant::now()).ok();
+device.sample()?;
+device.close()?;
+# Ok::<(), std::io::Error>(())
 ```
 
-The check defaults to zero output for 400 ms and closes. An optional signed Y
-force argument is limited to ±0.1 N for the first 200 ms, then zero for 200 ms.
-Live zero and -0.1 N runs each received 168 acknowledged samples and completed
-shutdown. They establish transport operation, not measured force magnitude.
-The owner subsequently reported that motors do not stop pen movement at block
-surfaces (P-0033). Effective physical contact resistance remains unresolved;
-calibration, command mapping, app scaling/limits and actuator response need
-investigation before claiming validated physical feedback.
+`EncoderState` is usable without hardware. The optional `serde` feature derives
+`Serialize`/`Deserialize` for `Registration`. `shutdown::install()` installs
+SIGINT/SIGTERM flags; the application must check `shutdown::requested()` in its
+worker and join it before exiting. Software cannot guarantee shutdown if the process
+is killed or the kernel stops scheduling it; no hardware watchdog is claimed.
 
-See [force specification](../../docs/spec/12-force-feedback.md) for provenance,
-model equations, lifecycle and application coupling.
+## Checks
 
-`EncoderState::continuous_counts()` maintains absolute unwrapped history;
-`position_m()` and the device force transform share that history. `recenter()`
-only resets relative counters. `ForceLimits` can lower the SDK ceilings and
-optionally latch a sustained-command-limit release; `UNIT_DERATING` scales force,
-slew and DAC ceilings once. Neither facility measures actual motor load.
-After a failed sample, `take_force_fault()` distinguishes a successfully stopped
-command-limit trip from an I/O failure. Failed shutdown always requires closing
-and reconnecting; it cannot be reported as a recoverable software trip.
+```sh
+cargo test -p visiontouch-device -p visiontouch-hal
+cargo build -p visiontouch-device --examples
+# Stop/disconnect Mass Lab before opening the same port; hold the arm at its reset pose.
+scripts/with-port-access target/debug/examples/feedback-check
+```
+
+`feedback-check` registers the start pose, then commands zero for 400 ms, or an
+optional signed Y force limited to ±0.1 N for the first 200 ms, and closes. It
+establishes transport operation, not delivered force. `baseline` records input only.
+
+See [force specification](../../docs/spec/12-force-feedback.md) for provenance, model
+equations and lifecycle. The kinematic model matches black-box reference queries, not
+a measured physical calibration of this unit.

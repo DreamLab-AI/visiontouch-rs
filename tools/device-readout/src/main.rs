@@ -1,7 +1,7 @@
-use haptics_hal::device::DeviceReader;
 use std::io::{self, Write};
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
+use visiontouch_hal::device::DeviceReader;
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
@@ -21,7 +21,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut device = DeviceReader::connect(path)?;
     let start = Instant::now();
-    let mut state = haptics_device::EncoderState::default();
+    let mut state = visiontouch_device::EncoderState::default();
+    let mut first = None;
     let mut output = io::BufWriter::new(io::stdout().lock());
     writeln!(
         output,
@@ -39,8 +40,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         state.update(sample);
         write!(output, ",{}", u8::from(state.button_pressed))?;
-        for value in state.relative_counts {
-            write!(output, ",{value}")?;
+        let first = *first.get_or_insert(state.continuous_counts());
+        for (value, start) in state.continuous_counts().into_iter().zip(first) {
+            write!(output, ",{}", value - start)?;
         }
         writeln!(output)?;
         output.flush()?;

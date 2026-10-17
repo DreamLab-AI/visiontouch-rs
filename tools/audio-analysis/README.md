@@ -1,13 +1,13 @@
 # Recorded motor audio
 
-`../analyze-motor-audio` describes an existing WAV recording without opening a
+`analyze-motor-audio` describes an existing WAV recording without opening a
 microphone, playing audio, or controlling hardware. It uses Python 3.11+ and the
 standard library. Supported inputs are mono/stereo signed integer PCM WAV files
 with 16, 24, or 32 bits, 8–192 kHz, at most 600 seconds and 1 GiB.
 
 ```sh
-tools/analyze-motor-audio recording.wav --output vendor-original/live-state/session/audio
-tools/analyze-motor-audio recording.wav --baseline quiet.wav --output vendor-original/live-state/session/audio-comparison
+tools/audio-analysis/analyze-motor-audio recording.wav --output vendor-original/live-state/session/audio
+tools/audio-analysis/analyze-motor-audio recording.wav --baseline quiet.wav --output vendor-original/live-state/session/audio-comparison
 python -m unittest discover -s tools/audio-analysis -p 'test_*.py'
 ```
 

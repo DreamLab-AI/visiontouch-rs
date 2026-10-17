@@ -1,236 +1,75 @@
 # Calibration Studio
 
-A native Rust calibration and haptics workbench built on `haptics-device`,
-`haptics-effects`, macroquad and egui. The servo worker owns device I/O and motor
-requests; graphics sends operator intent and displays snapshots.
+A native Rust workbench (macroquad and egui) that guides an attended session on the
+owner's haptic arm and records evidence for it. It sits on `visiontouch-device` and
+`visiontouch-effects`. A servo worker owns device I/O and motor requests; the interface
+sends intent and draws snapshots.
+
+Every "newton" it shows is a model command. Delivered force exists only in the
+operator readings (gauge, scale, mass) that the studio records beside each attempt.
 
 ```sh
-# Offline, mouse-driven preview; never opens the device
-tools/run-calibration --demo
-
-# Start offline and explicitly connect through the interface
-tools/run-calibration --no-device
-
-# Connect the parallel device with motor output OFF
-tools/run-calibration
+scripts/run-calibration --demo          # mouse-driven simulated plant, no hardware
+scripts/run-calibration --smoke-test    # headless end-to-end run against the simulator
+scripts/run-calibration --no-device     # start offline, connect from the interface
+scripts/run-calibration                 # connect with motor output OFF
+scripts/run-calibration --help
 ```
 
-The normal launcher refreshes the current user's parallel-port group access.
-The demo and smoke paths do not invoke that helper. `--no-device` refreshes
-permissions for a later explicit connection but opens no device at launch. A connection
-never enables motor output. No test in the verification commands below opens
-hardware.
+`--demo`, `--smoke-test` and `--help` never open hardware and do not invoke the
+port-access helper. Connecting never enables motor output.
 
-## Sweep calibration (default live workflow)
+## Session unlock ladder
 
-1. With output off, rest at a comfortable bottom-centre pose, hold still and
-   capture the bottom reference. This is an operator reference, not a hard stop.
-2. Select **Start / continue sweep**. Move through comfortable arcs at multiple
-   heights and depths. Points are retained once per 2 mm model cell, up to 20,000.
-   Exact observed extrema are tracked separately, including movement within an
-   existing cell; display thinning does not shrink the recorded axis spans.
-3. Select **Finish sweep**, move to a comfortable central pose, hold still and
-   **Record this pose as zero**. Extrema and coordinate spans are derived by the
-   app. Coordinates default to model millimetres about this chosen zero.
-4. **Export sweep evidence** retains the cloud, extrema, bottom reference and
-   chosen zero. Incomplete scans can also be exported. Reconnect or recapture
-   invalidates the old live mapping.
+Nothing persists across connections: a reconnect forgets every verdict. A refused
+Start names the missing prerequisite. Rung verdicts, with `m` measured and `c`
+commanded: **Over** if `m > 1.2c + 0.05 N` or the arm oscillates (blocks the next rung
+on that axis), **Pass** if `m >= 0.8c - 0.05 N`, otherwise **Under** (recorded with
+its slope, not blocking). A rung is cleared on an axis when one sign has a verdict and
+none is Over.
 
-The actual point cloud is displayed. Its enclosing box is only a display extent;
-empty space is unverified. Sweep maps require fresh live route teaching before
-any held pilot attempt (see below). Physical force and overload validation remain
-outstanding. The
-advanced six-bound workflow remains available for controlled box-based tests;
-it does not certify the corners as reachable. No scan restores motor authority.
+| Unlocks | Requires | Limits |
+|---|---|---|
+| Backdrive, channel liveness | connected | channels at most 96 counts |
+| Sign pulses | liveness on all 3 channels (felt, heard or lock-in), registration, return to reset within 2 mm, gravity drop toward -Y, ruler sign and off-axis on X, Y, Z | 0.5 N, 96 counts |
+| 0.1 to 0.5 N rungs, effects at 0.5 N, lift to 0.5 N | sign pulses on X, Y, Z | 0.5 N, 96 counts |
+| 1.0 N rung, lift to 1.0 N | 0.5 N rung cleared on X, Y, Z | 1.0 N, 300 counts |
+| 2.0 N rung, lift to 2.0 N | 1.0 N rung cleared on X, Y, Z | 2.0 N, 300 counts |
+| Effects to 1.0 N, wall ramp, thermal | 1.0 N rung cleared on X, Y, Z | 1.0 N, 300 counts |
 
-For an offline UI check, use `tools/run-calibration --sweep-smoke`.
-The [Three.js viewer](../workspace-viewer/README.md) replays recorded arm motion
-and displays observed-cell surfaces and a separately labelled convex bound.
+The studio is the only consumer that builds limits above the SDK defaults, only inside
+fixed-dwell steps, and sets limits explicitly (disarm, set, arm) for every attempt.
 
-## Advanced six-bound calibration
+## Interlocks (per step class)
 
-Select **Advanced: six-bound box calibration** and capture a fresh bottom
-reference to start this workflow. Existing sweep observations never authorize it.
+Hold key (all but thermal, which needs a Confirm every 30 s with a 10 s grace), interface
+heartbeat under 250 ms, sample interval under 25 ms, pen button, filtered speed
+(50 mm/s, or 400 mm/s for effects and wall), excursion from the start pose (3 mm ladder
+and thermal, 15 mm liveness and sign, 25 mm lift, 150 mm effects and wall), time bound
+(4, 1, 4, 60, 60, 660, 180 s for liveness, sign, ladder, lift, effects, thermal, wall),
+more than 10 s above 1.0 N, lift-off above 2 mm, and a wall oscillation detector
+(5 to 60 Hz band-passed Y velocity, RMS above 15 mm/s over 0.5 s). Any stop zeroes the
+demand on the same tick, output is disarmed, and only then is evidence written.
 
+## Evidence
 
-1. With motor output off, place the pen at the **bottom of travel**, centred
-   left/right and front/back. Keep it still for 0.3 seconds and select **Capture
-   bottom reference**. The app also records the bottom Y limit.
-2. Enter your working-coordinate minimum and maximum in mm for X (left/right),
-   Y (bottom/top), and Z (back/front). Each minimum must be negative and each
-   maximum positive. The initial −100/+100 values are example coordinate labels,
-   not manufacturer dimensions or measured lengths.
-3. Follow the on-screen guidance to record left, right, top, back (away from
-   you), and front (toward you). Move by hand with output off, use comfortable
-   limits, and hold still before each capture. Do not push mechanical stops.
-4. Confirm all six captures are present and the mapping is valid. The model
-   maximum must exceed the minimum by at least 2 mm on each axis. A failed
-   direction check is a reason to inspect and recapture that axis.
-5. Choose **Slow move to (0, 0, 0)** or a centre-mounted demonstration. Keep the
-   pen still inside the recorded volume before starting.
-6. **Hold Space or the hold button** for one attempt. Releasing, Escape, Stop,
-   or the pen button ends output. A held key cannot restart a failed attempt:
-   release it and start a new hold. Settings and calibration are frozen while
-   held. Closing the window clears hold, stops the worker and joins its thread.
+`captures/calibration/<utc>-<session_id>/` holds `session.json` and, per attempt,
+`<id>-<step>.csv` plus `<id>-<step>.json` (schema 2) with the SHA-256 of the CSV, the
+git commit read at run time, limits, registration, stop reason, telemetry summary,
+automatic measurements and the operator entries. Entries (gauge N, scale g,
+temperature C, ruler mm, felt and heard) are keyed to the attempt id and accepted only
+while output is off. Commit a session directory to `docs/evidence/` after the owner
+session. The coverage cloud exports as a plain viewer schema 1 capture.
 
-Start the slow move at its default 2 model mm/s and 0.1 model N cap. The target
-cannot lead the measured position by more than 2 model mm; sustained resistance
-without progress ends the attempt after five seconds. Reaching zero and settling
-also ends output. The app does not increase force to overcome resistance.
+## Modules
 
-## Centre demonstrations
-
-| Scene | What to explore |
-| --- | --- |
-| Hard cube | Compare resistance on all six faces; distinguish measured pen penetration from the contact proxy. |
-| Water sphere | Compare slow/fast drag and the small upward force inside the sphere. |
-| Balloon | Push inward slowly; deformation grows until a pop at 35% indentation. Release and hold again to reinflate. |
-| Three-body springs | Nudge three masses linked by pairwise springs and attracted toward a central anchor. |
-| Virtual plane | Compare vertical contact resistance with free tangential motion. |
-| Viscous field | Move in every direction, then stop; drag opposes velocity and vanishes at rest. |
-| Magnetic detents | Feel periodic, smooth wells along each axis. |
-
-Each scene resets at the next held attempt. Reset Scene clears the offline preview
-and trail. The hard cube and plane are bounded compliant models, not a claim of
-physically rigid surfaces. The app reuses the same hold, timing, volume, velocity
-and SDK guards for the physical experiments.
-
-Mint marks the pen, gold marks the contact proxy / moving target, and the orange
-arrow shows guarded model force (8 view units per model N). The volume is drawn
-in your working coordinates, which can stretch physical geometry when the axis
-mappings differ. Positions outside bounds remain visible. Right drag orbits,
-wheel zooms and Home restores the camera. In demo mode, left drag moves a virtual
-pen in X/Y and **Left Shift + wheel** adjusts depth; hold Space to simulate the
-selected effect. Demo telemetry and encoder placeholders are labelled simulation.
-
-## Baseline records
-
-**Save bounds** writes entered coordinates and selected speed/force settings to a
-named JSON file in `captures/calibration/`. **Load bounds** loads only those
-entries; it cannot restore a physical reference, measured extrema or output.
-Reconnect and bottom recapture invalidate the physical mapping as appropriate.
-
-Every physical held attempt writes a timestamped CSV and JSON metadata after
-output is disabled. The diagnostics show the last CSV path. After releasing output, use the operator
-observation card to annotate that attempt: Quiet, Normal, Laboured, Chatter or
-Other, plus free text. Optional optical temperature entries accept ambient °C
-and up to five user-labelled surface readings; blank values remain unset. Add
-sensor/target/settings/time notes, then select **Save observation with last
-attempt**. This writes `<attempt>.csv.observation.json` with an epoch timestamp.
-For the owner's Pixel 9 Pro, use **Object temperature**, hold the sensor beside
-the rear camera about 5 cm from the selected surface, and record the material
-setting and exact target. The app pre-fills these sensor notes for editing; it
-does not access the phone or import readings. See [Google's object-temperature
-instructions](https://support.google.com/pixelphone/answer/14103759?hl=en-uk).
-The ambient field is a separately obtained ambient reading, not an inference
-from the phone's object-temperature measurement.
-
-The optional **Audio recording (WAV)** field stores a reference to a separately
-recorded file, alongside the sound label for later baseline comparison. It never
-opens the microphone, starts recording, or uses acoustic analysis to control
-motors. An empty audio field remains unset.
-
-These are manually entered surface readings and listening impressions, not
-winding-temperature, force or recorded acoustic measurements; the app invents
-no temperature thresholds. Saving again updates that attempt's observation. Logs include raw and
-unwrapped counters for all six channels, model/working coordinates, target,
-requested and guarded model forces, motor offsets, acknowledgements and effect
-state. Wrist channels are observed; direct wrist torque is not implemented.
-
-The force chart displays command magnitudes, **not load-cell measurements**.
-The SDK applies its unit-wide `UNIT_DERATING` gain once across all applications;
-the diagnostics display that gain and the effective selected cap. Changing this
-constant scales the existing conservative envelope, not a manufacturer rating.
-Command caps, slew limits, deadlines and latched command-limit release do not
-measure the force actually delivered by the pen. The current Cartesian model
-and physical contact response remain under investigation. A user-defined box is
-not an absolute homing procedure, dimensional calibration, or proof every corner
-is mechanically reachable. See [the calibration specification](../../docs/spec/13-calibration.md)
-for exact interlocks and known limitations.
-
-## Offline verification
+`main` CLI and loop, `ui` panels, `scene` 3D view, `worker` engine and thread,
+`controller` interlocks, `protocol` steps and unlock ladder, `registration` stillness
+and checks, `evidence` writers, `arm` skeleton geometry (port of `armPose`),
+`coverage` display cloud, `sim` simulated plant, `smoke` headless end-to-end run.
+Only `worker` touches `visiontouch_device::Device`; the rest is hardware-free and tested.
 
 ```sh
-cargo test -p haptics-calibration -p haptics-effects
-cargo clippy -p haptics-calibration --all-targets -- -D warnings
-cargo build -p haptics-calibration
-xvfb-run -a -s '-screen 0 1480x960x24' \
-  env LIBGL_ALWAYS_SOFTWARE=1 \
-  CALIBRATION_SCREENSHOT=/tmp/calibration-studio.png \
-  target/debug/haptics-calibration --smoke-test
+cargo test -p visiontouch-studio
+cargo clippy -p visiontouch-studio --all-targets -- -D warnings
 ```
-
-The graphics smoke test renders every scene, exercises the zero planner and
-coordinate mapping, rejects an incomplete mapping, displays telemetry and
-hardware-disabled controls, then exits automatically. `--demo` and `--smoke-test`
-do not even spawn the device worker. The screenshot environment variable exports
-a rendered frame; the app never captures the desktop. These checks cannot
-establish physical force or release behaviour.
-
-**Export calibration evidence** saves the measured extrema and bottom reference
-with entered bounds while output is off. This record cannot restore an armed
-calibration; each new connection requires fresh physical captures.
-
-Attempt metadata includes the start wall-clock timestamp; CSV rows include
-monotonic elapsed time, servo interval, sample I/O time and command-limit status.
-Use a recorded synchronization cue or measured offset to align an external WAV;
-the wall-clock stamp alone does not establish microphone sample synchronization.
-
-The SDK reads a packet and services the previously queued force request before
-the worker evaluates the new position and interlocks. A stop therefore has
-servo-cycle and transport latency; it is not instantaneous mechanical isolation.
-Neither a process stall nor a failed shutdown transaction establishes zero
-physical motor force. Shutdown I/O failure invalidates the connection.
-
-## Reviewing a proposed straight path
-
-After recording zero, place the pen at a proposed starting pose, hold still and
-select **Review straight path from this pose**. The gold line is the exact
-reviewed segment; red marks its first unsupported interval. Moving the pen does
-not move those reviewed endpoints. New sweep samples or a changed zero invalidate
-previous review evidence.
-
-The hardware-free `haptics-workspace` crate merges analytic sphere/segment
-intersections over the entire line. The current review uses 5 mm neighbourhoods
-minus a 2 mm evidence margin, with a tiny conservative numerical inset. Recorded
-samples and the explicitly observed still endpoints supply evidence. These are
-model-space proximity parameters, not physical clearance or force limits. A
-supported review alone does not authorize powered movement.
-
-
-## Record a freehand return route
-
-Use the prominent **Record a return route** card above the experiment controls
-in the right panel. This replaces the old straight out-and-back teaching method.
-
-1. With motors off, place the pen at a comfortable interior working zero and hold
-   still. Click **Record zero & start route**. This records the current pose as
-   the new zero, so there is no small target to find by hand.
-2. Move freely along a comfortable path to the pose from which you want to start
-   the powered return. Curves are allowed; do not follow the optional straight
-   path-review line. Keep speed below 60 model mm/s.
-3. Hold still and click **Finish route at this pose**. Finish must be 5–500 model
-   mm from zero. A premature Finish explains the issue and leaves recording active.
-4. **Export route / diagnostic evidence** preserves the result and latest route
-   status. Invalid input, jumps over 3 mm, sample gaps over 100 ms, UI loss, Stop,
-   pen button or 180 seconds of recording cancel the trace. This 100 ms allowance
-   applies only to motor-off recording; powered sample intervals remain <=25 ms.
-5. Select **Slow move to (0, 0, 0)** and use a fresh hold when ready for an attended
-   pilot. Stay at the finishing pose. Output follows the gold recorded polyline
-   backwards to zero, with the same bounded speed, lead, stall and release checks.
-
-Every route segment must be supported by recorded observations. A direct chord
-through the workspace is never substituted for the recorded bends. Position
-projection stays local along the route so crossings cannot skip distant segments.
-The recorded start must be within 0.75 model mm when a zero attempt begins.
-
-Live confirmation expires after five minutes and is discarded on reconnect or
-calibration changes. Saved JSON cannot restore it. All swept-map pilots retain
-the 0.1 model N cap and 20 model mm maximum object radius. Leaving sample support
-or expiry during an attempt stops output along with the existing interlocks.
-
-Exports identify `freehand_reverse_v1`, original time-ordered observations and
-`return_route_model_m` in execution order. Failed recordings export `route_status`
-without live authorization. The route controls do not open a motor session.
-This revised workflow has been tested offline only; tracing does not verify
-physical force, thermal limits or overload release.

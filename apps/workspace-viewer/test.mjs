@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { armPose, voxelSurface, validateCapture } from "./geometry.mjs";
 test("arm endpoint matches SDK reference fixture", () => {
   const tip = armPose([6298, -1052, 1100, 0, 0, 0]).tip;
@@ -37,17 +38,26 @@ test("reject corrupt imports and oversized geometry parameters", () => {
   assert.throws(() => armPose([1, 2]));
 });
 
-test("native sweep exports translate the bottom reference without inventing encoder replay", () => {
+test("coverage exports validate as plain schema 1 captures", () => {
   const d = validateCapture({
     schema: 1,
-    reference_model_m: [0.1, 0.2, 0.3],
-    sweep: {
-      points_model_m: [
-        [0, 0, 0],
-        [0.01, 0.02, 0.03],
-      ],
-    },
+    points: [
+      [0, 0, 0],
+      [0.01, 0.02, 0.03],
+    ],
+    frames: [],
   });
-  assert.deepEqual(d.points[0], [0.1, 0.2, 0.3]);
+  assert.equal(d.points.length, 2);
+  assert.equal(d.frames.length, 0);
+});
+
+test("the calibration studio coverage fixture validates", () => {
+  const fixture = JSON.parse(
+    readFileSync(
+      new URL("./examples/calibration-coverage.json", import.meta.url),
+    ),
+  );
+  const d = validateCapture(fixture);
+  assert.equal(d.points.length, 2);
   assert.equal(d.frames.length, 0);
 });

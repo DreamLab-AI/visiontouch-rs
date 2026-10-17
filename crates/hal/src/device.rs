@@ -10,6 +10,18 @@ use std::os::unix::fs::{FileTypeExt, OpenOptionsExt};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+/// Transport backstop for every motor channel, in DAC counts from neutral.
+///
+/// `write_motor_offsets` clamps each channel to `±MAX_MOTOR_OFFSET` regardless of
+/// what the caller asks for. 300 counts is 14.7% of the 2047-count half-span of the
+/// 12-bit output word. It is an independent bound on the amplifier command, not a
+/// force rating: the SDK guard applies tighter application limits above it.
+pub const MAX_MOTOR_OFFSET: i16 = 300;
+
+fn clamp_offsets(offsets: [i16; 3]) -> [i16; 3] {
+    offsets.map(|x| x.clamp(-MAX_MOTOR_OFFSET, MAX_MOTOR_OFFSET))
+}
+
 const CLAIM: c_ulong = 0x708b;
 const RELEASE: c_ulong = 0x708c;
 const EXCLUSIVE: c_ulong = 0x708f;
@@ -39,6 +51,18 @@ impl Port {
         // SAFETY: all callers use a one-byte ppdev UAPI request with a live pointer.
         checked(unsafe { ioctl(self.0.as_raw_fd(), request, &mut value as *mut u8) })?;
         Ok(value)
+    }
+}
+
+/// A failed shutdown after a failed motor write outranks the write error: the caller
+/// must learn that the neutral packets may not have been delivered.
+fn write_failure(write: io::Error, shutdown: io::Result<()>) -> io::Error {
+    match shutdown {
+        Ok(()) => write,
+        Err(shutdown) => io::Error::new(
+            shutdown.kind(),
+            format!("output shutdown failed: {shutdown}; after: {write}"),
+        ),
     }
 }
 
@@ -279,18 +303,20 @@ impl DeviceReader {
     }
 
     /// Bounded raw actuator output for the identified unit; prefer the SDK's
-    /// force guard. The transport independently caps every channel at 96 counts.
+    /// force guard. The transport independently caps every channel at
+    /// [`MAX_MOTOR_OFFSET`] counts; this is a backstop, not the application limit.
     pub fn write_motor_offsets(&mut self, offsets: [i16; 3]) -> io::Result<()> {
         if !self.healthy || self.force_sequence.is_none() {
             return Err(io::Error::other("motor output is not armed"));
         }
-        let offsets = offsets.map(|x| x.clamp(-96, 96));
-        let result = self.send_motor_packet(offsets, 0xca, self.last_sequence.wrapping_add(1));
-        if result.is_err() {
-            self.healthy = false;
-            let _ = self.end_force_session();
+        let offsets = clamp_offsets(offsets);
+        match self.send_motor_packet(offsets, 0xca, self.last_sequence.wrapping_add(1)) {
+            Ok(()) => Ok(()),
+            Err(write) => {
+                self.healthy = false;
+                Err(write_failure(write, self.end_force_session()))
+            }
         }
-        result
     }
 
     /// Attempt both neutral/shutdown packets and clear local session state.
@@ -357,6 +383,13 @@ mod tests {
     use super::*;
     use std::collections::VecDeque;
 
+    #[test]
+    fn motor_offsets_clamp_at_max_motor_offset() {
+        assert_eq!(clamp_offsets([301, -301, i16::MIN]), [300, -300, -300],);
+        assert_eq!(clamp_offsets([300, -299, 0]), [300, -299, 0]);
+        assert_eq!(clamp_offsets([i16::MAX, 1, -1]), [300, 1, -1]);
+    }
+
     #[derive(Default)]
     struct Fake {
         statuses: VecDeque<u8>,
@@ -388,6 +421,21 @@ mod tests {
             }
             Ok(self.input.pop_front().unwrap())
         }
+    }
+    #[test]
+    fn a_failed_shutdown_outranks_the_write_error_that_caused_it() {
+        let e = write_failure(io::Error::other("write"), Ok(()));
+        assert_eq!(e.to_string(), "write");
+        let e = write_failure(
+            io::Error::other("write"),
+            Err(io::Error::new(io::ErrorKind::TimedOut, "neutral")),
+        );
+        assert_eq!(e.kind(), io::ErrorKind::TimedOut);
+        let text = e.to_string();
+        assert!(
+            text.starts_with("output shutdown failed: neutral") && text.ends_with("after: write"),
+            "{text}"
+        );
     }
     #[test]
     fn observed_button_press_and_release() {

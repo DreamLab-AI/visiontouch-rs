@@ -5,7 +5,7 @@ Uses ppdev register ioctls as an ordinary user, without vendor libraries.
 
 ```sh
 cargo build -p device-readout
-tools/with-port-access timeout -s KILL 10s target/debug/device-readout /dev/parport0 50
+scripts/with-port-access timeout -s KILL 10s target/debug/device-readout /dev/parport0 50
 ```
 
 Arguments are device path and sample count (default `/dev/parport0`, 10; maximum
@@ -16,7 +16,7 @@ Sampling is about 10 Hz and is not a real-time control loop.
 
 Connection performs active setup writes observed in a successful reference
 capture. Keep the workspace clear and power cutoff accessible. This readout tool does not enable output or send force packets. The separate
-`haptics-device` SDK implements bounded force requests. The button and all six
+`visiontouch-device` SDK implements bounded force requests. The button and all six
 counter rollovers are decoded; physical calibration and wrist axis meanings
 remain unverified.
 
@@ -37,7 +37,7 @@ feedback support. Capture evidence and source attribution are in
 Library use:
 
 ```rust,no_run
-use haptics_hal::device::DeviceReader;
+use visiontouch_hal::device::DeviceReader;
 
 # fn main() -> std::io::Result<()> {
 let mut device = DeviceReader::connect("/dev/parport0")?;

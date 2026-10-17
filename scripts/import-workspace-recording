@@ -19,7 +19,7 @@ def convert(path):
     analysis_path=path.with_name('analysis.json');analysis=json.loads(analysis_path.read_text()) if analysis_path.exists() else {}
     return {'schema':1,'name':path.parent.name,'sample_count':len(rows),'duration_s':float(rows[-1]['elapsed_ms'])/1000,'source_sha256':hashlib.sha256(raw).hexdigest(),'points':list(cells.values()),'frames':frames,'span_mm':[(b-a)*1000 for a,b in zip(minimum,maximum)],'reference_model_m':analysis.get('reference_model_m'),'reference_label':analysis.get('owner_pose_label','No physical reference assigned'),'force_output':False,'workspace_verified':False}
 if __name__=='__main__':
-    if len(sys.argv)!=2:raise SystemExit('Usage: tools/import-workspace-recording path/to/input.csv')
+    if len(sys.argv)!=2:raise SystemExit('Usage: scripts/import-workspace-recording path/to/input.csv')
     output=Path(__file__).resolve().parents[1]/'apps/workspace-viewer/data/latest.json';output.parent.mkdir(parents=True,exist_ok=True)
     data=convert(Path(sys.argv[1]));output.write_text(json.dumps(data,separators=(',',':')))
     print(f'{len(data["points"])} spatial samples, {len(data["frames"])} replay frames -> {output}')

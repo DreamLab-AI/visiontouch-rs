@@ -1,13 +1,13 @@
 # Device SDK and force feedback
 
-Evidence: P-0028 (black-box observation), P-0029 (application design).
+Evidence: P-0028 (black-box observation), P-0029 (application design), P-0061 (envelope), P-0062 (registration), P-0064 (Mass Lab coupling). Verification procedure: [14-force-calibration.md](14-force-calibration.md).
 
 ## Layer boundaries
 
 `hal` owns bounded software EPP transactions and the observed motor-session
-lifecycle. `haptics-device` is the reusable Rust SDK: six-channel counter
+lifecycle. `visiontouch-device` is the reusable Rust SDK: six-channel counter
 accumulation, reference-model kinematics, force transforms, clamps, slew limits,
-and stale-command rejection. The app owns bodies, gravity, contacts and grabs.
+and stale-command rejection, registration, and the force envelope below. The app owns bodies, gravity, contacts and grabs.
 It sends the spring-coupling reaction, including the effects of inertia and friction,
 not merely a mass-dependent constant force. Angular inertia contributes through
 contact/grip lever arms. Independent stylus torque actuation is not established;
@@ -46,18 +46,71 @@ Force queries and isolated torque queries give output word changes from 2047:
 Round to nearest integer. Quantization is roughly one count. Compare independent
 force fixtures before enabling this path. Never copy runtime configuration data.
 
-## Limits and stale data
+## Force envelope
 
-Initial force-vector limit 0.5 N, slew limit 2 N/s, per-channel offset limit 96
-counts. Requests older than 25 ms or non-finite requests produce immediate zero;
-no stale force is held. Explicitly arm/disarm; input failure ends the session.
-A UI pause/disconnect sends zero. These limits deliberately scale/cap simulated
-weights; a simulated 10 kg block must not command its full weight at the pen.
-The force loop must run independently of rendering. An OS stall or process kill
-cannot be covered by a software watchdog; hardware timeout behavior remains to
-be established.
+Design: P-0061, ADR-0002. All values are commands, not measured forces (P-0060).
 
-## Simulation
+| Quantity | Value |
+|---|---|
+| SDK model-force ceiling | 2.0 N |
+| Default (`ForceLimits::default`) | 0.5 N, 96 counts, 100 N/s |
+| Continuous-content cap | 1.0 N (effects, demos, Mass Lab) |
+| DAC ceiling | 300 counts, equal to the HAL clamp |
+| Raw channel test cap | 96 counts |
+| Slew | 100 N/s (0.24 N per 2.4 ms tick) |
+| Request expiry | 25 ms |
+
+The default is the envelope armed live in P-0030. Limits can only be lowered below the
+ceilings, and only while disarmed. 134 counts per model newton on channels 1 and 2
+(P-0028 gains, equal Jacobian column norms) gives 268 counts at 2 N; 300 adds 10 percent.
+The DAC limit is the only bound that does not depend on the uncertain gains.
+
+Requests older than 25 ms, non-finite requests and zero demands produce immediate zero;
+no stale force is held and zero is never slewed. Arm and disarm are explicit; there is no
+automatic rearm. Input failure ends the session. A UI pause or disconnect sends zero.
+Demand above a cap is clamped and reported in telemetry (`force_capped`, `dac_capped`,
+`slewing`, `expired`). There is no sustained-command release trip, so every error from
+`Device::sample` is a transport fault and the connection is closed. Invalid demand is
+rejected synchronously by `Device::request`; only a failed shutdown after a rejection
+obliges the caller to reconnect, and it takes precedence over the rejection.
+
+**Uniform DAC scaling.** If the largest channel demand exceeds the DAC limit, the whole
+applied force vector is scaled by one factor. Per-channel clamping would rotate the force
+and leak tangential force into a wall. The HAL clamp remains an independent backstop.
+
+**Raw channel demand.** `Demand::Channels` drives the three channels directly for the
+actuator liveness check (14-force-calibration.md section 6.2). It shares arming, expiry
+and both clamps, skips slew and the force model, and is capped at 96 counts. It does not
+need registration.
+
+**Registration is a precondition for Cartesian demand.** `Demand::Force` yields zero
+while unregistered, and `Device::request` rejects it. The Jacobian is evaluated at
+registered counts (continuous counters minus the reset capture, P-0062), never at
+power-on-relative angles. Registration is cleared on reconnect.
+
+A software watchdog cannot cover an OS stall or process kill; hardware timeout behaviour
+remains to be established.
+
+## Mass Lab servo-rate coupling
+
+Design: P-0064. Mass Lab hands its worker a `Coupling` descriptor in registered model
+metres: proxy position, proxy velocity, stiffness, damping and the instant it was issued.
+On every servo tick the worker reads the sample, computes F = K (proxy - p) - B (v - v_proxy)
+from that sample, and requests it, so output no longer depends on the UI frame rate (F3).
+
+Each per-tick request is stamped with the evaluation time. This does not refresh a stale
+request: the request is recomputed from the sample just read and is new each tick. The
+SDK rule "never refresh a stale request's time" still holds for any caller that resends
+an old value. The descriptor itself has its own age limit of 100 ms (six frames at 60 fps).
+An older descriptor produces zero and the reason "force muted: scene stalled", so a UI
+stall cannot tether the pen to a frozen proxy. Other mute reasons are paused simulation,
+time scale not 1.00x, unregistered, and feedback off.
+
+Mass Lab uses `ForceLimits::default` (0.5 N, 96 counts), a fixed stiffness of 150 model
+N/m and no measured K, and may not raise limits. A 2 kg block then produces about 0.45 N
+through proxy lag. The old 0.02 scene-force scale is removed.
+
+## Simulation (application side)
 
 The minimum-mass block is free in translation and rotation (lowest ID breaks
 ties). Other blocks have X/Z translation and all rotation locked. Re-evaluate
@@ -74,8 +127,7 @@ to the proxy and report its equal/opposite reaction to the device SDK. This
 includes contact, grab loads, linear inertia and off-centre rotational effects
 without relying on solver warm-start impulses as force measurements. A stationary
 supported load produces its weight through spring deflection. The rendering
-shows the proxy position; the input trail shows the measured target. Scene force
-is scaled by 0.02 before the device-level clamp. No direct wrist torque is sent.
+shows the proxy position; the input trail shows the measured target. The worker evaluates the tether at servo rate (section above). No direct wrist torque is sent.
 
 ## Native lifecycle validation
 
@@ -91,13 +143,15 @@ SIGINT/SIGTERM only set an atomic flag. The worker notices it and performs I/O
 cleanup outside signal context. The GUI handles window-close requests and joins
 the worker before exiting. Software shutdown cannot cover SIGKILL or kernel stalls.
 
-## Unresolved physical contact resistance
+## History and the unresolved contact report
 
-On 2026-10-16 the owner reported: “the motors don't stop me moving when i get to
-the surface of the block” (P-0033). The current app therefore has not demonstrated
-the expected physical surface resistance. Passing numerical force tests and
-acknowledged packets establish neither delivered force nor a rigid contact.
-The 2% scene-force scale and 0.5 N cap may contribute; the cause is unconfirmed.
-Next investigation should correlate contact reaction, guarded force, motor
-commands and measured/observed physical response, checking calibration and axis
-mapping. Preserve current limits until evidence supports any change.
+On 2026-10-16 the owner reported "the motors don't stop me moving when i get to the
+surface of the block" (P-0033). The audit of revision bef1ccd (P-0060) explains this
+without any hardware fault and the explanation is untested. The 2026-10-16 envelope
+(0.5 N, 2 N/s slew, 0.02 Mass Lab scale, 250 ms sustained-command release) put commanded
+force below uncompensated arm weight and static friction at the tip for the
+calibration moves (P-0060), and a pen held in a hand masks small forces in Mass Lab: a saturating spring tripped the release
+after about 0.6 s. Amplifier enable is also unproven (force-audit F6), and every force
+run evaluated the Jacobian at unregistered angles. Passing numerical tests and
+acknowledged packets establish neither delivered force nor a rigid contact. Only the
+attended procedure in 14-force-calibration.md can test the explanation.

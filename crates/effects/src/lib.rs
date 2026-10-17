@@ -1,14 +1,14 @@
 //! Canonical haptic effects in metres, seconds and model newtons.
 //!
 //! This crate is pure simulation: it never opens hardware or arms motors. Pass
-//! its reaction through `haptics_device::ForceGuard` and an explicitly armed
+//! its reaction through `visiontouch_device::ForceGuard` and an explicitly armed
 //! device session. The caller owns volume, timing and operator interlocks.
 //! Positions are relative to the calibrated centre. A contact proxy is the
 //! nearest point on a simulated surface; it can differ from the measured pen.
 //!
 //! ```
-//! use haptics_effects::{Effect, Kind};
-//! let mut cube = Effect::new(Kind::Cube, 0.02);
+//! use visiontouch_effects::{Effect, Kind, Tuning};
+//! let mut cube = Effect::new(Kind::Cube, 0.02, Tuning::default());
 //! let contact = cube.step([0.019, 0., 0.], [-0.001, 0., 0.], 0.002);
 //! assert!(contact.force[0] > 0.); // opposes penetration into the +X face
 //! ```
@@ -48,6 +48,52 @@ pub mod math {
     }
 }
 use math::*;
+
+/// Reference stiffness in N/m that the fixed effect constants were written for.
+pub const REFERENCE_STIFFNESS_N_M: f64 = 150.;
+/// Lowest accepted [`Tuning::stiffness_n_m`].
+pub const MIN_STIFFNESS_N_M: f64 = 20.;
+/// Highest accepted [`Tuning::stiffness_n_m`].
+pub const MAX_STIFFNESS_N_M: f64 = 1500.;
+
+/// Operator-tunable effect strength, in model units. These are commands, not
+/// measured delivered stiffness.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Tuning {
+    /// Wall stiffness in model N/m, clamped to 20-1500 (default 150). The cube,
+    /// plane and balloon use it directly; the other effects scale their fixed
+    /// constants by `stiffness_n_m / 150`, so every force is linear in it.
+    pub stiffness_n_m: f64,
+    /// Contact damping in model N·s/m for the cube and plane (default 4), clamped to
+    /// 0-100. The balloon uses half of it; other effects keep their own damping.
+    pub damping_n_s_m: f64,
+}
+impl Default for Tuning {
+    fn default() -> Self {
+        Self {
+            stiffness_n_m: REFERENCE_STIFFNESS_N_M,
+            damping_n_s_m: 4.,
+        }
+    }
+}
+impl Tuning {
+    fn sanitised(self) -> Self {
+        let d = Self::default();
+        Self {
+            stiffness_n_m: if self.stiffness_n_m.is_finite() {
+                self.stiffness_n_m
+                    .clamp(MIN_STIFFNESS_N_M, MAX_STIFFNESS_N_M)
+            } else {
+                d.stiffness_n_m
+            },
+            damping_n_s_m: if self.damping_n_s_m.is_finite() {
+                self.damping_n_s_m.clamp(0., 100.)
+            } else {
+                d.damping_n_s_m
+            },
+        }
+    }
+}
 
 /// Original models used to isolate surface, damping, deformation and dynamic issues.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -149,14 +195,16 @@ impl Default for Frame {
 pub struct Effect {
     kind: Kind,
     radius: f64,
+    tuning: Tuning,
     frame: Frame,
     velocities: [V; 3],
 }
 impl Effect {
     /// `radius` is a cube half-width or sphere radius in metres, clamped to
     /// 0.2–100 model mm. Non-finite radii select the 20 mm default.
-    /// Construction resets deformation, rupture and body velocities.
-    pub fn new(kind: Kind, radius: f64) -> Self {
+    /// `tuning` is sanitised (see [`Tuning`]). Construction resets deformation,
+    /// rupture and body velocities.
+    pub fn new(kind: Kind, radius: f64, tuning: Tuning) -> Self {
         let radius = if radius.is_finite() {
             radius.clamp(0.0002, 0.1)
         } else {
@@ -170,6 +218,7 @@ impl Effect {
         Self {
             kind,
             radius,
+            tuning: tuning.sanitised(),
             frame,
             velocities: [[0.; 3]; 3],
         }
@@ -184,6 +233,11 @@ impl Effect {
             return Frame::default();
         }
         let r = self.radius;
+        let Tuning {
+            stiffness_n_m: k,
+            damping_n_s_m: b,
+        } = self.tuning;
+        let s = k / REFERENCE_STIFFNESS_N_M;
         let f = &mut self.frame;
         f.proxy = p;
         f.force = [0.; 3];
@@ -195,19 +249,19 @@ impl Effect {
                         .unwrap();
                     let sign = if p[i] >= 0. { 1. } else { -1. };
                     f.proxy[i] = sign * r;
-                    f.force[i] = sign * (150. * (r - p[i].abs()) + 4. * (-sign * v[i]).max(0.));
+                    f.force[i] = sign * (k * (r - p[i].abs()) + b * (-sign * v[i]).max(0.));
                 }
             }
             Kind::Plane => {
                 if p[1] < 0. {
                     f.proxy[1] = 0.;
-                    f.force[1] = -150. * p[1] + 4. * (-v[1]).max(0.);
+                    f.force[1] = -k * p[1] + b * (-v[1]).max(0.);
                 }
             }
             Kind::Water => {
                 let immersion = ((r - norm(p)) / (r * 0.25)).clamp(0., 1.);
-                f.force = mul(v, -immersion * (4. + 80. * norm(v)));
-                f.force[1] += 0.03 * immersion;
+                f.force = mul(v, -immersion * (4. + 80. * norm(v)) * s);
+                f.force[1] += 0.03 * immersion * s;
             }
             Kind::Balloon => {
                 let depth = (r - norm(p)).max(0.);
@@ -220,15 +274,16 @@ impl Effect {
                     f.proxy = mul(direction, r);
                     f.force = mul(
                         direction,
-                        80. * depth + 6000. * depth * depth + 2. * (-dot(v, direction)).max(0.),
+                        s * (80. * depth + 6000. * depth * depth)
+                            + b * 0.5 * (-dot(v, direction)).max(0.),
                     );
                 }
             }
-            Kind::Viscous => f.force = mul(v, -8.),
+            Kind::Viscous => f.force = mul(v, -8. * s),
             Kind::Detents => {
                 let spacing = r * 0.6;
                 f.force = std::array::from_fn(|i| {
-                    -0.06 * (p[i] * std::f64::consts::TAU / spacing).sin() - 0.5 * v[i]
+                    s * (-0.06 * (p[i] * std::f64::consts::TAU / spacing).sin() - 0.5 * v[i])
                 });
             }
             Kind::Springs => {
@@ -285,7 +340,7 @@ impl Effect {
                             limit(add(self.velocities[i], mul(*force, h / 0.02)), 0.2);
                         f.bodies[i] = add(f.bodies[i], mul(self.velocities[i], h));
                     }
-                    f.force = add(f.force, mul(reaction, 1. / steps as f64));
+                    f.force = add(f.force, mul(reaction, s / steps as f64));
                 }
             }
         }
@@ -298,23 +353,35 @@ mod tests {
     use super::*;
     #[test]
     fn cube_and_plane_push_out_of_surface() {
-        let f = Effect::new(Kind::Cube, 0.02).step([0.019, 0., 0.], [-0.01, 0., 0.], 0.002);
+        let f = Effect::new(Kind::Cube, 0.02, Tuning::default()).step(
+            [0.019, 0., 0.],
+            [-0.01, 0., 0.],
+            0.002,
+        );
         assert!(f.force[0] > 0.);
         assert_eq!(f.proxy[0], 0.02);
-        let f = Effect::new(Kind::Plane, 0.02).step([0., -0.001, 0.], [0.; 3], 0.002);
+        let f = Effect::new(Kind::Plane, 0.02, Tuning::default()).step(
+            [0., -0.001, 0.],
+            [0.; 3],
+            0.002,
+        );
         assert!(f.force[1] > 0.);
         assert_eq!(f.proxy[1], 0.);
     }
     #[test]
     fn fluids_oppose_motion_and_detents_restore_toward_well() {
         for kind in [Kind::Water, Kind::Viscous] {
-            let f = Effect::new(kind, 0.02).step([0.; 3], [0.01, 0., 0.], 0.002);
+            let f = Effect::new(kind, 0.02, Tuning::default()).step([0.; 3], [0.01, 0., 0.], 0.002);
             assert!(f.force[0] < 0.);
         }
-        let f = Effect::new(Kind::Detents, 0.02).step([0.001, 0., 0.], [0.; 3], 0.002);
+        let f = Effect::new(Kind::Detents, 0.02, Tuning::default()).step(
+            [0.001, 0., 0.],
+            [0.; 3],
+            0.002,
+        );
         assert!(f.force[0] < 0.);
         assert_eq!(
-            Effect::new(Kind::Viscous, 0.02)
+            Effect::new(Kind::Viscous, 0.02, Tuning::default())
                 .step([0.; 3], [0.; 3], 0.002)
                 .force,
             [0.; 3]
@@ -322,7 +389,7 @@ mod tests {
     }
     #[test]
     fn balloon_deforms_pops_and_reset_restores_it() {
-        let mut e = Effect::new(Kind::Balloon, 0.02);
+        let mut e = Effect::new(Kind::Balloon, 0.02, Tuning::default());
         let f = e.step([0.018, 0., 0.], [0.; 3], 0.002);
         assert!(f.deformation > 0.);
         assert!(f.force[0] > 0.);
@@ -331,15 +398,15 @@ mod tests {
         assert_eq!(f.force, [0.; 3]);
         assert!(e.step([0.018, 0., 0.], [0.; 3], 0.002).popped);
         assert!(
-            !Effect::new(Kind::Balloon, 0.02)
+            !Effect::new(Kind::Balloon, 0.02, Tuning::default())
                 .step([0.018, 0., 0.], [0.; 3], 0.002)
                 .popped
         );
     }
     #[test]
     fn three_body_integration_is_finite_symmetric_and_consistent() {
-        let mut a = Effect::new(Kind::Springs, 0.02);
-        let mut b = Effect::new(Kind::Springs, 0.02);
+        let mut a = Effect::new(Kind::Springs, 0.02, Tuning::default());
+        let mut b = Effect::new(Kind::Springs, 0.02, Tuning::default());
         let mut frame = Frame::default();
         for _ in 0..1000 {
             frame = a.step([1.; 3], [0.; 3], 0.002);
@@ -354,8 +421,54 @@ mod tests {
         assert!(norm(frame.bodies.into_iter().fold([0.; 3], add)) < 1e-10);
     }
     #[test]
+    fn tuning_scales_force_linearly() {
+        let at = |kind, k: f64, p, v| {
+            Effect::new(
+                kind,
+                0.02,
+                Tuning {
+                    stiffness_n_m: k,
+                    ..Tuning::default()
+                },
+            )
+            .step(p, v, 0.002)
+            .force
+        };
+        for (kind, p, v) in [
+            (Kind::Cube, [0.019, 0., 0.], [0.; 3]),
+            (Kind::Plane, [0., -0.001, 0.], [0.; 3]),
+            (Kind::Balloon, [0.018, 0., 0.], [0.; 3]),
+            (Kind::Detents, [0.001, 0., 0.], [0.; 3]),
+            (Kind::Viscous, [0.; 3], [0.01, 0., 0.]),
+            (Kind::Water, [0.; 3], [0.01, 0., 0.]),
+        ] {
+            let a = at(kind, 150., p, v);
+            let b = at(kind, 300., p, v);
+            let c = at(kind, 1_000_000., p, v);
+            let d = at(kind, 20., p, v);
+            for i in 0..3 {
+                let ratio = if kind == Kind::Balloon {
+                    None
+                } else {
+                    Some(2.)
+                };
+                if let Some(r) = ratio {
+                    assert!((b[i] - r * a[i]).abs() < 1e-12, "{kind:?} {a:?} {b:?}");
+                }
+                assert!(
+                    (c[i].abs() - 10. * a[i].abs()).abs() < 1e-12 || kind == Kind::Balloon,
+                    "clamped to 1500"
+                );
+                assert!(d[i].abs() <= a[i].abs() + 1e-12);
+            }
+        }
+        // Cube and plane: exactly the spring law with the chosen stiffness.
+        let f = at(Kind::Cube, 400., [0.019, 0., 0.], [0.; 3]);
+        assert!((f[0] - 400. * 0.001).abs() < 1e-12);
+    }
+    #[test]
     fn invalid_inputs_never_produce_force() {
-        let mut e = Effect::new(Kind::Cube, 0.02);
+        let mut e = Effect::new(Kind::Cube, 0.02, Tuning::default());
         assert_eq!(e.step([f64::NAN, 0., 0.], [0.; 3], 0.002).force, [0.; 3]);
         assert_eq!(e.step([0.; 3], [0.; 3], 0.1).force, [0.; 3]);
     }

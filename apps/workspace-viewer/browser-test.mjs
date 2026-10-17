@@ -43,27 +43,28 @@ try {
     buffer: Buffer.from(
       JSON.stringify({
         schema: 1,
-        reference_model_m: [0, 0, 0],
-        sweep: {
-          points_model_m: [
-            [0, 0, 0],
-            [0.1, 0, 0],
-            [0, 0.1, 0],
-            [0, 0, 0.1],
-          ],
-        },
+        name: "Calibration coverage cloud",
+        points: [
+          [0, 0, 0],
+          [0.1, 0, 0],
+          [0, 0.1, 0],
+          [0, 0, 0.1],
+        ],
+        frames: [],
+        sample_count: 4,
+        duration_s: 1,
       }),
     ),
   });
   await page.waitForFunction(
     () =>
       document.getElementById("captureTitle").textContent ===
-      "Calibration sweep export",
+      "Calibration coverage cloud",
   );
   assert.equal(await page.locator("#play").isDisabled(), true);
   assert.deepEqual(errors, []);
   console.log(
-    "Browser checks passed: rendering, playback, geometry toggles, link adjustment, GLB and native import.",
+    "Browser checks passed: rendering, playback, geometry toggles, link adjustment, GLB and coverage import.",
   );
 } finally {
   await browser.close();

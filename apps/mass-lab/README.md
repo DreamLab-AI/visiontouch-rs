@@ -11,7 +11,7 @@ lowest block ID. Adding/removing blocks or editing masses updates this choice.
 From the repository root:
 
 ```sh
-tools/run-mass-lab
+scripts/run-mass-lab
 # Simulation only, without opening the device:
 cargo run -p mass-lab -- --no-device
 ```
@@ -39,7 +39,7 @@ acceleration in this model; it affects momentum, impulses and collision response
 | Restore camera | Home or Home view |
 | Select a block | Left click on the block or its sidebar row |
 | Remove selected block | Delete or Remove |
-| Recenter the device pointer | C or Recenter |
+| Zero at reset pose (register the device origin) | C or Zero at reset pose |
 | Close | Escape or the window manager's close action |
 
 Scroll the sidebar for the impulse experiment, block spawning and view controls.
@@ -65,18 +65,18 @@ properties wakes sleeping bodies. Reset preserves world settings and pauses.
 ## Live haptic pointer
 
 The app now connects to `/dev/parport0` through the existing Rust `DeviceReader`
-and shows a cyan pointer and trail. `tools/run-mass-lab` refreshes port-access
+and shows a cyan pointer and trail. `scripts/run-mass-lab` refreshes port-access
 groups through the existing launcher. The desktop entry also uses this launcher.
 Reads run on a worker thread so the UI stays responsive; disconnect/error releases
 the port, and samples older than 500 ms are marked stale. The simulation-only and
 graphics-smoke modes do not connect to hardware.
 
-This is **relative reference-model motion**, not a physically calibrated tool-tip pose.
-The device SDK now computes reference-model Cartesian positions from the first
-three arm counters. Position and force share those axes; the default scale is
-40 scene metres per model metre. Physical calibration is still unfinished. The starting physical pose is the bottom of vertical
-travel and the centre of the other axes. The software origin is `(0, -0.3, 0)`,
-beneath the floor, allowing entry under resting blocks. Hold that pose and press **C** to establish the reference.
+The pen position is the reference-model Cartesian position **relative to the
+registered reset pose**, not a physically calibrated tool-tip pose. Hold the arm at
+its reset pose (arm level, square to the base) and press **C** or **Zero at reset
+pose**; until then the pointer does not drive the scene and feedback is disabled.
+Registration makes that pose the model origin, which maps to the scene point
+`(0, -0.3, 0)` beneath the floor, at 40 scene metres per model metre by default.
 Sensitivity, height/depth swapping and axis inversion are under **Motion mapping**.
 An explicit message indicates when the visual pointer reaches scene limits.
 
@@ -87,26 +87,33 @@ A screen-space ring keeps the pointer visible through the floor and blocks.
 The target moves at up to 8 scene metres/second. A dynamic 0.2 kg proxy follows
 through a stabilized spring/damper; the sphere shows its actual contact position. Pause freezes physics; stale input/disconnect releases grabs.
 The button is decoded from three observed physical press/release cycles (P-0026).
-Enable **pen force feedback** in the sidebar, or launch with `--force-feedback`.
-The app sends the equal/opposite spring-coupling reaction through `haptics-device`:
-weight, acceleration/deceleration, contact and off-centre rotational effects.
-The force is averaged across physics steps, scaled to 2%, then limited by the SDK
-to 0.5 N, 2 N/s slew and 96 DAC counts. Pressing into a block increases the
-computed opposing force until the limit; physical resistance is not validated
-(see the known issue below). This does not command 100% motor output or create
-an infinitely rigid surface. A zero request bypasses the slew limit. Pause or non-1× simulation
-speed sends zero. The independent worker zeros commands older than 25 ms.
+Enable **pen force feedback** in the sidebar once the pose is registered. Feedback
+turns off whenever you register again.
+
+The force is a **model command, not a measured force**. The UI sends a coupling
+descriptor (proxy position and velocity in registered model metres, stiffness and
+damping) every frame. The device worker evaluates `F = K (proxy - p) - B (v - v_proxy)`
+on **every servo tick** from the sample it has just read, with `K` a device stiffness
+in model N/m (default 150, slider 20 to 1500), never the scene's 600 N/unit spring.
+A descriptor older than 100 ms is ignored, so a stalled UI cannot tether the pen to a
+frozen proxy. The SDK then caps the vector at the default 0.5 N (`DEFAULT_FORCE_N`, ADR-0002), limits
+each channel to 96 DAC counts by scaling the whole vector, and slews at up to
+100 N/s. A 2 kg block hanging from the proxy lags it by about 3 mm, so the pen is
+commanded about 0.45 N at the default stiffness. Next to "Pen force" the sidebar shows why the
+force is zero when it is: feedback off, unregistered, paused, time scale not 1.00x
+(within 0.5%; the slider snaps to 1.00x), or scene stalled, plus cap, slew and
+expiry badges and a count of muted servo ticks. The worker samples on every loop
+iteration and drains UI messages without blocking, so UI traffic cannot starve input.
 
 The selected-block panel shows linear/angular momentum, and **Spin lightest block**
 applies a 0.1 N·m·s angular impulse. All six input encoders, including wrist/pen
 channels and their relative counts, are visible in the sidebar. Optional raw CSV
 capture is enabled with `--capture-input=PATH` (truncates that path at startup).
 
-**Known issue (2026-10-16, P-0033):** the owner reports that motors do not stop
-pen motion when it reaches a block surface. Effective surface resistance remains
-unresolved. The 2% scale and 0.5 N cap may contribute, but the cause has not been
-established; packet acknowledgements and simulation tests do not prove physical
-force delivery.
+**Known issue (2026-10-16, P-0033):** the owner reported that motors did not stop pen
+motion at a block surface. Delivered force has never been measured, and a 0.45 N
+block weight cannot stop a hand. Judge delivery with a fingertip or a hands-off
+test, then with the Calibration Studio's gauge protocol (`docs/spec/14-force-calibration.md`).
 
 Only main-arm motor-command transport has been verified. The owner's possible two smaller wrist
 actuators remain unidentified; direct torque requests are rejected by the SDK.
@@ -125,15 +132,16 @@ hardware tools. The protocol and mapping are documented in
 cargo test -p mass-lab
 cargo clippy -p mass-lab --all-targets -- -D warnings
 xvfb-run -a -s '-screen 0 1280x820x24' \
-  env LIBGL_ALWAYS_SOFTWARE=1 target/debug/mass-lab --smoke-test
+  env LIBGL_ALWAYS_SOFTWARE=1 target/debug/mass-lab --smoke-test   # needs Xvfb and GL libraries
 ```
 
-Nineteen app tests cover gravity across masses, inverse-mass impulse response, mass edits,
+The app tests cover gravity across masses, inverse-mass impulse response, mass edits,
 floor collisions, removal and population limits, ray picking, pause behavior,
-frame-rate independence, reset behavior, encoder rollover, recentering, stale-data
+frame-rate independence, reset behavior, scene/device round trip, coupling expiry,
+mute reasons, worker sampling under message floods, the 2 kg block force, stale-data
 detection, the owner-requested axis mapping, contact lifting across masses, grab/release,
-and loss-of-input/deletion cleanup. Six HAL tests verify button decoding and readout; three SDK tests verify all-six
-rollovers, reference model/force fixtures, arming, clamps and stale requests.
+and loss-of-input/deletion cleanup. The HAL and SDK tests cover button decoding, readout, the transport clamp, registration,
+rollover, guard limits, slew, DAC scaling and expiry.
 Additional app checks cover weight reactions, inertial reaction, both momenta,
 and the free/vertical constraint selection. The graphics smoke test renders and
 steps all three presets, edits mass, and spawns/removes a body before exiting.

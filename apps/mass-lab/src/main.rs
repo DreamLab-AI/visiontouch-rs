@@ -5,6 +5,12 @@ mod scene;
 use egui_macroquad::egui::{self, Color32, RichText};
 use macroquad::prelude::*;
 use physics::{DT, MAX_BLOCKS, Preset, Simulation};
+use pointer::MuteReason;
+
+/// Time scale counts as real time when within half a percent of 1.00x.
+fn real_time(speed: f32) -> bool {
+    (speed - 1.).abs() < 0.005
+}
 
 const ACCENT: Color32 = Color32::from_rgb(108, 225, 197);
 const MUTED: Color32 = Color32::from_rgb(141, 158, 178);
@@ -16,7 +22,6 @@ struct App {
     running: bool,
     speed: f32,
     accumulator: f32,
-    feedback_force: Vec3,
     spawn_mass: f32,
     spawn_size: f32,
     impulse: f32,
@@ -34,7 +39,6 @@ impl App {
             running: false,
             speed: 1.,
             accumulator: 0.,
-            feedback_force: Vec3::ZERO,
             spawn_mass: 2.,
             spawn_size: 1.25,
             impulse: 5.,
@@ -60,7 +64,7 @@ impl App {
         let p = self.pointer.position;
         self.sim.set_pointer(
             self.pointer
-                .live()
+                .active()
                 .then_some(rapier3d::prelude::Vector::new(p.x, p.y, p.z)),
             self.pointer.button_held,
         );
@@ -72,21 +76,38 @@ impl App {
             return;
         }
         self.accumulator += (frame_time.clamp(0., 0.1) * self.speed).min(0.1);
-        let mut total_force = Vec3::ZERO;
-        let mut steps = 0;
         while self.accumulator >= DT {
             self.sim.step();
-            let f = self.sim.reaction_force;
-            total_force += vec3(f.x, f.y, f.z);
-            steps += 1;
             self.accumulator -= DT;
-        }
-        if steps > 0 {
-            self.feedback_force = total_force / steps as f32;
         }
         if self.selected.is_some_and(|id| self.sim.block(id).is_none()) {
             self.selected = None;
         }
+    }
+    /// Why the pen gets no force right now, or `None` when force is flowing.
+    fn force_mute_reason(&self) -> Option<MuteReason> {
+        if !self.pointer.feedback {
+            Some(MuteReason::FeedbackOff)
+        } else if !self.pointer.registered {
+            Some(MuteReason::Unregistered)
+        } else if !self.running {
+            Some(MuteReason::NotRunning)
+        } else if !real_time(self.speed) {
+            Some(MuteReason::NotRealTime)
+        } else if !self.pointer.live() {
+            Some(MuteReason::SceneStalled)
+        } else {
+            self.pointer.worker_muted
+        }
+    }
+    /// Send this frame's proxy tether to the worker, or an explicit mute.
+    fn send_coupling(&self) {
+        let proxy = (self.running && real_time(self.speed)).then(|| {
+            let p = self.sim.pointer_position();
+            let v = self.sim.pointer_velocity();
+            (vec3(p.x, p.y, p.z), vec3(v.x, v.y, v.z))
+        });
+        self.pointer.send_coupling(proxy);
     }
     fn delete_selected(&mut self) {
         if let Some(id) = self.selected.take() {
@@ -300,7 +321,7 @@ fn interface(app: &mut App, ctx: &egui::Context, fps: i32) -> (Rect, bool) {
                             if app.pointer.connected || app.pointer.connecting {
                                 if ui.button("Disconnect").clicked() { app.pointer.disconnect(); }
                             } else if ui.button("Connect device").clicked() { app.pointer.connect(); }
-                            if ui.add_enabled(live, egui::Button::new("Recenter · C")).clicked() { app.pointer.recenter(); }
+                            if ui.add_enabled(live, egui::Button::new("Zero at reset pose · C")).clicked() { app.pointer.zero_at_reset_pose(); }
                         });
                         ui.horizontal(|ui| {
                             ui.checkbox(&mut app.pointer.visible, "Show pointer");
@@ -313,15 +334,26 @@ fn interface(app: &mut App, ctx: &egui::Context, fps: i32) -> (Rect, bool) {
                         });
                         if !app.running { ui.label(RichText::new("Paused · press Space to interact").color(MUTED)); }
                         let mut feedback=app.pointer.feedback;
-                        if ui.add_enabled(live,egui::Checkbox::new(&mut feedback,"Enable pen force feedback")).changed() { app.pointer.set_feedback(feedback); }
-                        if feedback {
+                        if ui.add_enabled(live && app.pointer.registered,egui::Checkbox::new(&mut feedback,"Enable pen force feedback")).changed() { app.pointer.set_feedback(feedback); }
+                        if !app.pointer.registered && live { ui.label(RichText::new("Hold the arm at its reset pose, then zero at reset pose. Feedback needs registration.").size(11.).color(MUTED)); }
+                        if app.pointer.feedback {
                             let f=app.pointer.applied_force;
-                            ui.label(format!("Pen force: {:.3} N · cap 0.5 N",(f[0]*f[0]+f[1]*f[1]+f[2]*f[2]).sqrt()));
-                            ui.label(RichText::new("2% force scale · pause sends zero").size(11.).color(MUTED));
+                            let t=app.pointer.telemetry;
+                            ui.label(format!("Pen force: {:.3} N command · cap {:.1} N / {} counts",(f[0]*f[0]+f[1]*f[1]+f[2]*f[2]).sqrt(),visiontouch_device::DEFAULT_FORCE_N,visiontouch_device::DEFAULT_DAC_OFFSET));
+                            match app.force_mute_reason() {
+                                Some(reason) => { ui.label(RichText::new(reason.text()).size(11.).color(Color32::from_rgb(249,185,101))); }
+                                None => { ui.label(RichText::new("model command, not a measured force").size(11.).color(MUTED)); }
+                            }
+                            if t.force_capped || t.dac_capped || t.slewing || t.expired {
+                                ui.label(RichText::new(format!("{}{}{}{}",if t.force_capped {"force cap · "} else {""},if t.dac_capped {"DAC cap · "} else {""},if t.slewing {"slew · "} else {""},if t.expired {"expired"} else {""})).size(11.).color(MUTED));
+                            }
+                            ui.label(RichText::new(format!("{} muted servo ticks",app.pointer.muted_ticks)).size(11.).color(MUTED));
                         }
+                        ui.label("Coupling stiffness (model)");
+                        ui.add(egui::Slider::new(&mut app.pointer.stiffness_n_m, pointer::STIFFNESS_RANGE).suffix(" N/m").logarithmic(true));
                         ui.collapsing("All six encoders", |ui| {
                             ui.monospace(format!("Arm: {:?}\nPen/wrist: {:?}",&app.pointer.encoders[..3],&app.pointer.encoders[3..]));
-                            ui.monospace(format!("Pen deltas: {:?}",&app.pointer.relative_encoders[3..]));
+                            ui.monospace(format!("Continuous: {:?}",app.pointer.continuous));
                         });
                         ui.collapsing("Motion mapping", |ui| {
                             if ui.checkbox(&mut app.pointer.swap_height_depth, "Swap height / depth").changed() { app.pointer.trail.clear(); }
@@ -337,11 +369,11 @@ fn interface(app: &mut App, ctx: &egui::Context, fps: i32) -> (Rect, bool) {
                                     if ui.checkbox(&mut app.pointer.invert[i], axis).changed() { app.pointer.trail.clear(); }
                                 }
                             });
-                            ui.label(RichText::new("Start at the bottom of travel, centred left/right and fore/aft. Recenter sets that reference. Relative motion; Cartesian calibration is unfinished.").size(11.).color(MUTED));
+                            ui.label(RichText::new("Hold the reset pose (arm level, square to the base) and press Zero at reset pose. The pen then maps from registered model metres; the Cartesian scale is not physically calibrated.").size(11.).color(MUTED));
                             ui.monospace(format!("{} samples", app.pointer.samples));
                         });
                         if app.pointer.clamped && live {
-                            ui.label(RichText::new("At scene limit: recenter or lower sensitivity.").size(11.).color(Color32::from_rgb(249,185,101)));
+                            ui.label(RichText::new("At scene limit: lower sensitivity or zero at the reset pose.").size(11.).color(Color32::from_rgb(249,185,101)));
                         }
                     });
                     ui.add_space(3.);
@@ -384,11 +416,16 @@ fn interface(app: &mut App, ctx: &egui::Context, fps: i32) -> (Rect, bool) {
                             app.sim.wake_all();
                         }
                         ui.label("Time scale");
-                        ui.add(
-                            egui::Slider::new(&mut app.speed, 0.25..=2.)
-                                .suffix("×")
-                                .fixed_decimals(2),
-                        );
+                        let slid = ui
+                            .add(
+                                egui::Slider::new(&mut app.speed, 0.25..=2.)
+                                    .suffix("×")
+                                    .fixed_decimals(2),
+                            )
+                            .changed();
+                        if slid && (app.speed - 1.).abs() < 0.03 {
+                            app.speed = 1.;
+                        }
                         ui.collapsing("Surface properties", |ui| {
                             let a = ui
                                 .add(
@@ -669,7 +706,7 @@ fn interface(app: &mut App, ctx: &egui::Context, fps: i32) -> (Rect, bool) {
 
 #[macroquad::main(window_conf)]
 async fn main() {
-    if let Err(e) = haptics_device::shutdown::install() {
+    if let Err(e) = visiontouch_device::shutdown::install() {
         eprintln!("Cannot install orderly shutdown: {e}");
         return;
     }
@@ -684,7 +721,7 @@ async fn main() {
     let mut previous_mouse = Vec2::from(mouse_position());
     let mut frame = 0;
     loop {
-        if is_quit_requested() || haptics_device::shutdown::requested() {
+        if is_quit_requested() || visiontouch_device::shutdown::requested() {
             break;
         }
         app.pointer.poll();
@@ -704,7 +741,7 @@ async fn main() {
         });
         if !keyboard {
             if is_key_pressed(KeyCode::C) {
-                app.pointer.recenter();
+                app.pointer.zero_at_reset_pose();
             }
             if is_key_pressed(KeyCode::Escape) {
                 break;
@@ -733,12 +770,7 @@ async fn main() {
             app.selected = scene::pick(&app.sim, &camera, rect, previous_mouse);
         }
         app.advance(get_frame_time());
-        let force = if app.running && app.speed == 1. {
-            app.feedback_force * 0.02
-        } else {
-            Vec3::ZERO
-        };
-        app.pointer.send_force(force);
+        app.send_coupling();
         scene::draw(&app.sim, app.selected, &camera, app.grid);
         scene::draw_pointer(&app.pointer, &app.sim, &camera);
         egui_macroquad::draw();
@@ -785,6 +817,37 @@ async fn main() {
 #[cfg(test)]
 mod app_tests {
     use super::*;
+    #[test]
+    fn mute_reasons_cover_paused_speed_and_unregistered() {
+        let mut app = App::new();
+        assert_eq!(app.force_mute_reason(), Some(MuteReason::FeedbackOff));
+        app.pointer.feedback = true;
+        assert_eq!(app.force_mute_reason(), Some(MuteReason::Unregistered));
+        app.pointer.registered = true;
+        app.pointer.connected = true;
+        app.pointer.last_sample = Some(std::time::Instant::now());
+        assert_eq!(app.force_mute_reason(), Some(MuteReason::NotRunning));
+        app.running = true;
+        app.speed = 1.004;
+        assert_eq!(
+            app.force_mute_reason(),
+            None,
+            "within half a percent is real time"
+        );
+        app.speed = 1.02;
+        assert_eq!(app.force_mute_reason(), Some(MuteReason::NotRealTime));
+        app.speed = 1.;
+        app.pointer.last_sample =
+            Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+        assert_eq!(app.force_mute_reason(), Some(MuteReason::SceneStalled));
+        app.pointer.last_sample = Some(std::time::Instant::now());
+        app.pointer.worker_muted = Some(MuteReason::SceneStalled);
+        assert_eq!(app.force_mute_reason(), Some(MuteReason::SceneStalled));
+        app.pointer.worker_muted = None;
+        assert_eq!(app.force_mute_reason(), None);
+        assert!(real_time(1.) && !real_time(1.01) && !real_time(0.99));
+    }
+
     #[test]
     fn paused_simulation_does_not_accumulate_time() {
         let mut app = App::new();

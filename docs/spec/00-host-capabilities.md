@@ -13,4 +13,4 @@ EPP=4, ECP=8, COMPAT=16, DMA=32, SAFEININT=64. Preserve the raw mask and unknown
 bits. These are host capabilities; a disconnected cable yields the same result.
 Never label this as successful unit identification or a working EPP transaction.
 Fail on an absent/non-character node, permission error, or unsuccessful ioctl.
-No automatic sudo or fallback writes. Use tools/with-port-access to refresh groups.
+No automatic sudo or fallback writes. Use scripts/with-port-access to refresh groups.

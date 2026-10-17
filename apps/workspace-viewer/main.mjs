@@ -312,7 +312,7 @@ async function latest() {
     if (!r.ok) r = await fetch("./examples/owner-sweep.json");
     if (!r.ok)
       throw Error(
-        "No capture available. Import one with tools/import-workspace-recording.",
+        "No capture available. Import one with scripts/import-workspace-recording.",
       );
     loadCapture(await r.json());
   } catch (e) {

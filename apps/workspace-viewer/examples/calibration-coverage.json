@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "name": "Calibration coverage cloud",
+  "points": [
+    [0.001, 0.003, -0.005],
+    [0.003, 0.003, -0.005]
+  ],
+  "frames": [],
+  "sample_count": 2,
+  "duration_s": 1.5,
+  "reference_label": "Reset-pose registration; display only, no encoder replay"
+}

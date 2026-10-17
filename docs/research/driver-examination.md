@@ -63,7 +63,7 @@ an offline experiment input, not a reviewed live configuration.
 
 ## Rust and host verification
 
-`cargo build --workspace` succeeds. `tools/with-port-access target/debug/port-probe`
+`cargo build --workspace` succeeds. `scripts/with-port-access target/debug/port-probe`
 opens `/dev/parport0` as John and returns host capability mask `0x4f`. A syscall
 trace confirms only open, PPGETMODES, close on that node. No port claim,
 negotiation or data transfer occurred. The host query is the functional verification of port-probe. The recorder now
@@ -84,7 +84,7 @@ has automated integration checks using ordinary files; see tools/port-recorder/R
    implementing those operations in Rust. Validate replies against actual unit
    movement. Force commands require the watchdog, clamp and amplifier interlock.
 
-`tools/vendor-sandbox COMMAND [ARG ...]` is a reusable offline launcher. It exposes
+`scripts/vendor-sandbox COMMAND [ARG ...]` is a reusable offline launcher. It exposes
 reference files read-only at `/vendor`, writable experiment state at `/state`,
 and defaults to `/state` as the working directory. It provides no live capture
 mode. Supply runtime search paths explicitly when launching reference tools.

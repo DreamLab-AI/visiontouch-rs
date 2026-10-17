@@ -1,4 +1,4 @@
-/** Reference-model kinematics, shared convention with haptics-device.
+/** Reference-model kinematics, shared convention with visiontouch-device.
  * This is a visualization, not an independent physical calibration. */
 export function armPose(counts, upper = 0.1397, lower = 0.1397) {
   if (
@@ -24,37 +24,6 @@ export function armPose(counts, upper = 0.1397, lower = 0.1397) {
   return { shoulder, elbow, tip, angles: [a, b, c] };
 }
 export function validateCapture(data) {
-  // Native calibration exports contain positions relative to bottom reference.
-  if (data?.schema === 1 && data?.sweep?.points_model_m) {
-    const ref = data.reference_model_m;
-    if (
-      !Array.isArray(ref) ||
-      ref.length !== 3 ||
-      ref.some((v) => !Number.isFinite(v))
-    )
-      throw Error("Invalid bottom reference");
-    const points = data.sweep.points_model_m;
-    if (!Array.isArray(points) || points.length > 20000)
-      throw Error("Invalid sweep export");
-    for (const p of points)
-      if (
-        !Array.isArray(p) ||
-        p.length !== 3 ||
-        p.some((v) => !Number.isFinite(v))
-      )
-        throw Error("Invalid sweep point");
-    data = {
-      schema: 1,
-      name: "Calibration sweep export",
-      points: points.map((p) => p.map((v, i) => v + ref[i])),
-      frames: [],
-      reference_model_m: ref,
-      reference_label:
-        "Bottom reference; no recorded encoder replay in this export",
-      sample_count: points.length,
-      duration_s: 0,
-    };
-  }
   if (
     data?.schema !== 1 ||
     !Array.isArray(data.points) ||

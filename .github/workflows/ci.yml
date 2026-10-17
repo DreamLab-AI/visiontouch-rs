@@ -1,0 +1,45 @@
+name: CI
+
+# The quality gate from ADR-0005. It proves software claims only; nothing here
+# opens the haptic device. Attended physical acceptance is recorded in
+# docs/clean-room/PROVENANCE.md, not in CI.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history for the ADR staleness gate)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Native dependencies for macroquad and ALSA
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev libx11-dev libxi-dev libgl1-mesa-dev pkg-config
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/workspace-viewer/package-lock.json
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Quality gate
+        run: scripts/quality-gate.sh

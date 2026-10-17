@@ -9,5 +9,5 @@ publish.workspace = true
 macroquad = "0.4.16"
 egui-macroquad = { version = "0.17.3", default-features = false }
 rapier3d = "0.36.1"
-haptics-hal = { path = "../../crates/hal" }
-haptics-device = { path = "../../crates/device" }
+visiontouch-hal = { path = "../../crates/hal" }
+visiontouch-device = { path = "../../crates/device" }

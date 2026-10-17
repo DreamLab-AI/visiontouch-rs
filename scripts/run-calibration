@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+cargo build --manifest-path "$repo_dir/Cargo.toml" --target-dir "$repo_dir/target" -p visiontouch-studio
+cd -- "$repo_dir"
+case " ${*} " in
+  *" --demo "*|*" --smoke-test "*|*" --help "*|*" -h "*)
+    exec "$repo_dir/target/debug/visiontouch-studio" "$@" ;;
+  *) exec "$repo_dir/scripts/with-port-access" "$repo_dir/target/debug/visiontouch-studio" "$@" ;;
+esac

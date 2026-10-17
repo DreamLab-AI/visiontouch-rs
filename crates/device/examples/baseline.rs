@@ -1,10 +1,10 @@
 //! Input-only baseline: no force session is armed and no motor packet is sent.
-//! Run through tools/with-port-access; redirect CSV to a session-specific path.
-use haptics_device::Device;
+//! Run through scripts/with-port-access; redirect CSV to a session-specific path.
 use std::io::{self, Write};
 use std::time::{Duration, Instant};
+use visiontouch_device::Device;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    haptics_device::shutdown::install()?;
+    visiontouch_device::shutdown::install()?;
     let argument = std::env::args().nth(1);
     let seconds = if argument.as_deref() == Some("--until-stop") {
         None
@@ -17,6 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let mut device = Device::connect("/dev/parport0")?;
     device.sample()?;
+    let first = device.state.continuous_counts();
     eprintln!(
         "Recording input only; PID {}; SIGTERM/SIGINT stops and flushes. No force session armed.",
         std::process::id()
@@ -27,10 +28,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut output = io::BufWriter::new(io::stdout().lock());
     writeln!(
         output,
-        "sample,elapsed_ms,interval_us,io_us,e0,e1,e2,e3,e4,e5,d0,d1,d2,d3,d4,d5,model_x_m,model_y_m,model_z_m,button,raw_hex"
+        "sample,elapsed_ms,interval_us,io_us,e0,e1,e2,e3,e4,e5,d0,d1,d2,d3,d4,d5,unreg_x_m,unreg_y_m,unreg_z_m,button,raw_hex"
     )?;
     while seconds.is_none_or(|limit| start.elapsed().as_secs_f64() < limit)
-        && !haptics_device::shutdown::requested()
+        && !visiontouch_device::shutdown::requested()
     {
         let before = Instant::now();
         let packet = device.sample()?;
@@ -45,10 +46,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for value in device.state.counts {
             write!(output, ",{value}")?;
         }
-        for value in device.state.relative_counts {
-            write!(output, ",{value}")?;
+        for (value, start) in device.state.continuous_counts().into_iter().zip(first) {
+            write!(output, ",{}", value - start)?;
         }
-        let position = device.state.position_m();
+        // Power-on-relative, unregistered: for display and diagnosis only.
+        let position = device.state.unregistered_position_m();
         for value in position {
             write!(output, ",{value:.10}")?;
         }

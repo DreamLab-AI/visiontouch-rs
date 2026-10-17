@@ -12,7 +12,7 @@ import tempfile
 import unittest
 import wave
 
-TOOL = Path(__file__).resolve().parents[1] / "analyze-motor-audio"
+TOOL = Path(__file__).resolve().parent / "analyze-motor-audio"
 LOADER = importlib.machinery.SourceFileLoader("motor_audio", str(TOOL))
 SPEC = importlib.util.spec_from_loader(LOADER.name, LOADER)
 AUDIO = importlib.util.module_from_spec(SPEC)

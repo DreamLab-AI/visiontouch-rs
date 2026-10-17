@@ -8,7 +8,7 @@ fi
 python3 - <<'PY'
 from pathlib import Path
 import zipfile
-root=Path.cwd(); archive=root/'Photos-1-001 (1).zip'; photos=root/'captures/device-photos'
+root=Path.cwd(); archive=root/'docs/evidence/owner-photos-20261016.zip'; photos=root/'captures/device-photos'
 names=['PXL_20261016_193305912.jpg','PXL_20261016_193315075.jpg','PXL_20261016_193321358.jpg']
 if archive.exists():
     photos.mkdir(parents=True,exist_ok=True)

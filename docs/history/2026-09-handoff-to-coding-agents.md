@@ -1,6 +1,6 @@
 # Handoff brief for coding agents
 
-Read `README.md`, `docs/03-session-handoff-2026-10-16.md`, `docs/01-verdict.md`, and `docs/clean-room/POLICY.md` before writing anything. The latest session handoff corrects assumptions in the earlier research and takes precedence for host facts and immediate task order.
+Read `README.md`, `docs/history/2026-10-16-session-handoff.md`, `docs/verdict.md`, and `docs/clean-room/POLICY.md` before writing anything. The latest session handoff corrects assumptions in the earlier research and takes precedence for host facts and immediate task order.
 
 ## Non-negotiables
 
@@ -21,7 +21,7 @@ Read `README.md`, `docs/03-session-handoff-2026-10-16.md`, `docs/01-verdict.md`,
 
 ## Environment facts
 
-- Current host: Omarchy (Arch-based), with `parport`, `parport_pc`, and `ppdev` already loaded. `/dev/parport0` exists as `root:lp` mode 0660; the account belongs to `lp`, but the agent process still lacks that supplementary group. Use `tools/with-port-access COMMAND [ARG ...]` to launch port tools with refreshed account groups from the stale session. Access has been verified this way as John. Do not recreate the node or relax its permissions.
+- Current host: Omarchy (Arch-based), with `parport`, `parport_pc`, and `ppdev` already loaded. `/dev/parport0` exists as `root:lp` mode 0660; the account belongs to `lp`, but the agent process still lacks that supplementary group. Use `scripts/with-port-access COMMAND [ARG ...]` to launch port tools with refreshed account groups from the stale session. Access has been verified this way as John. Do not recreate the node or relax its permissions.
 - PCIe cards do not sit at 0x378; always discover the base address via ppdev, never hardcode.
 - USB-to-parallel adapters cannot be used; printer-class only.
 - Reassess available Rust bindings when implementation begins; the earlier crate-availability research is not a current dependency inventory.

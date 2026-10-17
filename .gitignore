@@ -32,3 +32,11 @@ Cargo.lock.bak
 /captures/device-photos/
 /apps/workspace-viewer/data/
 /apps/workspace-viewer/photos
+
+# Local archive for superseded captures, logs and scratch material (ADR-0005).
+# Nothing in it is evidence until it has a provenance row and lives under docs/evidence/.
+/archive/*
+!/archive/README.md
+
+# Agent coordination state
+/.claude-flow/

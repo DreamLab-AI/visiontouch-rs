@@ -301,6 +301,11 @@ impl Simulation {
         self.world.bodies[self.pointer_body].translation()
     }
 
+    /// Proxy (pointer body) velocity in scene metres per second.
+    pub fn pointer_velocity(&self) -> Vector {
+        self.world.bodies[self.pointer_body].linvel()
+    }
+
     fn release_grab(&mut self) {
         if let Some((_, joint)) = self.grab.take() {
             self.world.remove_impulse_joint(joint);
@@ -527,6 +532,49 @@ mod tests {
             );
             assert!(sim.reaction_force.x.abs() < 0.1 && sim.reaction_force.z.abs() < 0.1);
         }
+    }
+
+    #[test]
+    fn two_kg_block_feels_about_0_45_n() {
+        use crate::pointer::{Coupling, DEFAULT_STIFFNESS_N_M, device_position, device_velocity};
+        let (sensitivity, invert) = (0.004_f32, [false; 3]);
+        let mut sim = settled_scene();
+        sim.set_pointer(Some(Vector::new(0., -0.21, 0.)), true);
+        sim.step();
+        let target = Vector::new(0., 2., 0.);
+        sim.set_pointer(Some(target), true);
+        for _ in 0..600 {
+            sim.step();
+        }
+        assert_eq!(sim.grabbed_block(), Some(2), "the 2 kg block is held");
+        let to_m = |v: Vector| {
+            device_position(
+                macroquad::prelude::vec3(v.x, v.y, v.z),
+                sensitivity,
+                invert,
+                false,
+            )
+        };
+        let v = sim.pointer_velocity();
+        let coupling = Coupling {
+            proxy_m: to_m(sim.pointer_position()),
+            bounds_m: ([-1.; 3], [1.; 3]),
+            proxy_velocity_m_s: device_velocity(
+                macroquad::prelude::vec3(v.x, v.y, v.z),
+                sensitivity,
+                invert,
+                false,
+            ),
+            stiffness_n_m: DEFAULT_STIFFNESS_N_M,
+            damping_n_s_m: 0.,
+            issued: std::time::Instant::now(),
+        };
+        let f = coupling.force(to_m(target), [0.; 3]);
+        assert!(
+            (-0.5..-0.40).contains(&f[1]),
+            "weight pulls the pen down about 0.45 N: {f:?}"
+        );
+        assert!(f[0].abs() < 0.02 && f[2].abs() < 0.02, "{f:?}");
     }
 
     #[test]

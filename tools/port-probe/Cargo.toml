@@ -6,4 +6,4 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
-haptics-hal = { path = "../../crates/hal" }
+visiontouch-hal = { path = "../../crates/hal" }

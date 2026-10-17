@@ -1,5 +1,5 @@
 [package]
-name = "haptics-calibration"
+name = "visiontouch-studio"
 version = "0.1.0"
 edition.workspace = true
 rust-version = "1.89"
@@ -8,8 +8,10 @@ publish.workspace = true
 [dependencies]
 macroquad = "0.4.16"
 egui-macroquad = { version = "0.17.3", default-features = false }
-haptics-device = { path = "../../crates/device" }
-haptics-effects = { path = "../../crates/effects" }
-haptics-workspace = { path = "../../crates/workspace" }
+visiontouch-hal = { path = "../../crates/hal" }
+visiontouch-device = { path = "../../crates/device", features = ["serde"] }
+visiontouch-effects = { path = "../../crates/effects" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
+getrandom = "0.2"
