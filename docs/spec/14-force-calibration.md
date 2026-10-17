@@ -254,8 +254,9 @@ would saturate a 2 N cap at 0.4 N/mm and mask the instability. Stiffness K steps
 force cap binds.
 
 Stop on oscillation: the 5 to 60 Hz band-passed Y velocity RMS above 15 mm/s over 0.5 s,
-computed from a velocity filtered over four ticks (one count per 2.4 ms is about
-10 mm/s raw), or on operator release. The structural resonance of the family is near
+computed from the interlock velocity, which is displacement over a 9.6 ms window
+(four nominal ticks; one count per 2.4 ms is about 10 mm/s raw) and so does not
+depend on the loop cadence (P-0065), or on operator release. The structural resonance of the family is near
 125 Hz (P-0054), above the detector band by design. Operator entries: the step at which a sustained buzz began. Result: K_marginal is
 the last stiffness before the stop. Unlocked only after the 1.0 N rung passes on X, Y
 and Z.

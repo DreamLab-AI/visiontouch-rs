@@ -14,6 +14,10 @@ use visiontouch_effects::math::{V, norm, sub};
 pub const OVER_CAP_BUDGET_S: f64 = 10.;
 /// Oscillation RMS threshold, metres per second.
 pub const OSC_RMS_M_S: f64 = 0.015;
+/// Interlock velocity window, seconds: four nominal 2.4 ms ticks (P-0065).
+pub const VEL_WINDOW_S: f64 = 0.0096;
+/// Shortest span over which a velocity is reported; below it the velocity is zero.
+pub const VEL_MIN_SPAN_S: f64 = 0.002;
 /// Oscillation analysis window, seconds.
 pub const OSC_WINDOW_S: f64 = 0.5;
 /// Lift-off is declared after this rise, metres.
@@ -306,8 +310,7 @@ struct Active {
     limits: ClassLimits,
     started: Instant,
     start_pos: V,
-    prev_pos: V,
-    vel_buf: VecDeque<V>,
+    vel_buf: VecDeque<(f64, V)>,
     over_cap_s: f64,
     osc: Oscillation,
     lock_rows: Vec<(f64, [f64; 3])>,
@@ -370,7 +373,6 @@ impl Controller {
             limits,
             started: input.now,
             start_pos: input.position,
-            prev_pos: input.position,
             vel_buf: VecDeque::new(),
             over_cap_s: 0.,
             osc: Oscillation::default(),
@@ -442,19 +444,27 @@ impl Controller {
         let a = self.active.as_mut()?;
         let t = input.now.saturating_duration_since(a.started).as_secs_f64();
         let dt = input.interval_s.max(1e-4);
-        let first = a.vel_buf.is_empty() && t == 0.;
-        let raw_v = if first || !input.position.iter().all(|x| x.is_finite()) {
-            [0.; 3]
-        } else {
-            sub(input.position, a.prev_pos).map(|d| d / dt)
-        };
-        a.prev_pos = input.position;
-        a.vel_buf.push_back(raw_v);
-        while a.vel_buf.len() > 4 {
+        // Interlock velocity: displacement over a fixed time window rather than a
+        // mean of the last four samples. A four-sample mean spans 10 ms only at the
+        // nominal 2.4 ms cadence; an unpaced loop at 0.28 ms shrank it to 1 ms and
+        // turned encoder quantisation into a phantom 50 mm/s (P-0065). The window
+        // is measured in seconds, so cadence cannot change what the interlock sees.
+        if input.position.iter().all(|x| x.is_finite()) {
+            a.vel_buf.push_back((t, input.position));
+        }
+        while a
+            .vel_buf
+            .front()
+            .is_some_and(|(t0, _)| t - t0 > VEL_WINDOW_S && a.vel_buf.len() > 2)
+        {
             a.vel_buf.pop_front();
         }
-        let n = a.vel_buf.len() as f64;
-        let vel: V = std::array::from_fn(|i| a.vel_buf.iter().map(|v| v[i]).sum::<f64>() / n);
+        let vel: V = match (a.vel_buf.front(), a.vel_buf.back()) {
+            (Some((t0, p0)), Some((t1, p1))) if t1 - t0 >= VEL_MIN_SPAN_S => {
+                sub(*p1, *p0).map(|d| d / (t1 - t0))
+            }
+            _ => [0.; 3],
+        };
 
         // Interlocks, most specific first.
         let mut stop = a.pending;

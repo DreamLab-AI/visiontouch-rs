@@ -9,6 +9,7 @@ report its actual monotonic interval to the existing 25 ms sample-gap interlock.
 Do not replace measured time with nominal time or change any force, raw-channel,
 velocity, excursion or hold threshold. The simulator retains its own clock.
 
-The existing four-tick filter then covers roughly 10 ms at nominal cadence,
-rather than roughly 1 ms with the unpaced worker observed in P-0065. This does
+The interlock velocity is now displacement over a fixed 9.6 ms window rather
+than a four-sample mean, so it covers the same span at any cadence; pacing
+remains required so the window holds about four samples rather than thirty. This does
 not establish hard-real-time scheduling or guarantee that liveness passes.

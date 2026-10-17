@@ -1317,7 +1317,7 @@ mod tests {
     use crate::sim::{SimHw, SimPlant};
 
     #[test]
-    fn captured_liveness_speed_trips_depend_on_unpaced_sampling() {
+    fn captured_liveness_traces_no_longer_trip_speed_at_any_cadence() {
         let captures = [
             include_str!("../../../docs/evidence/liveness-cadence-20261017/0003-liveness.csv"),
             include_str!("../../../docs/evidence/liveness-cadence-20261017/0004-liveness.csv"),
@@ -1379,15 +1379,10 @@ mod tests {
                         break;
                     }
                 }
-                if paced {
-                    assert_eq!(stop, None, "channel {channel}: resampled short trace");
-                } else {
-                    assert_eq!(
-                        stop,
-                        Some(StopReason::Speed),
-                        "channel {channel}: original trace"
-                    );
-                }
+                // P-0065: the original 0.28 ms traces tripped a four-sample
+                // velocity mean. With a time-window velocity neither the original
+                // nor the resampled trace trips, because the arm barely moved.
+                assert_eq!(stop, None, "channel {channel}: paced={paced}");
             }
         }
         // These short replays do not assert that a physical two-second trial passes.
