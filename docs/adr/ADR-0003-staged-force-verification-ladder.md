@@ -7,7 +7,7 @@ implementation_status: complete
 activation_status: staged
 supersedes: []
 superseded_by: []
-verified_commit: e6f9d018f1ee88bd4db315937c9d66a3b95d1818
+verified_commit: 93c9c49fcf6c985c446906d5bf6698d3d414ac9f
 verified_paths: [apps/calibration/src/protocol.rs, apps/calibration/src/controller.rs, docs/spec/14-force-calibration.md]
 owner: jjohare
 review_trigger: a committed OWNER verification record (docs/evidence/force-verification-*), after which the per-session ladder may become a spot check
