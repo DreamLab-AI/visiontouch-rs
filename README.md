@@ -1,4 +1,22 @@
+<div align="center">
+
 # visiontouch-rs
+
+### A clean-room Rust host stack for a haptic arm
+
+[![Status](https://img.shields.io/badge/Status-private%20study%20%C2%B7%20proof%20of%20principle-8b5cf6?style=flat-square)](docs/charter.md)
+[![Rust](https://img.shields.io/badge/Rust-1.85%2B%20%C2%B7%20edition%202024-f74c00?style=flat-square&logo=rust)](Cargo.toml)
+[![Estate](https://img.shields.io/badge/Estate-VisionFlow-10b981?style=flat-square)](https://github.com/DreamLab-AI/VisionFlow)
+
+**Force you can feel, only after it has been measured.**
+
+**Maintainer**: [John O'Hare](https://github.com/jjohare)
+
+[Where it sits](#where-visiontouch-rs-sits) · [Status](#status) · [Running](#running) · [Safety](#safety) · [Reading order](#reading-order) · [Legal](#legal-summary)
+
+</div>
+
+---
 
 A clean-room Rust host stack, on Linux, for a 1990s **SensAble PHANTOM 1.0A**
 haptic arm that connects over an IEEE-1284 EPP parallel cable. The vendor stack
@@ -15,6 +33,20 @@ VisionClaw graph. The intended written output is an academic paper. The
 repository is not affiliated with, endorsed by, or derived from code belonging to
 SensAble Technologies, Geomagic or 3D Systems; product names identify the hardware
 being studied.
+
+---
+
+## Where visiontouch-rs sits
+
+visiontouch-rs is a supporting study in the [VisionFlow](https://github.com/DreamLab-AI/VisionFlow) estate, listed in its [repository map](https://github.com/DreamLab-AI/VisionFlow/blob/main/docs/architecture/repository-map.md) and [ecosystem map](https://github.com/DreamLab-AI/VisionFlow/blob/main/docs/ecosystem-map.md). It is a proof of principle, not a runtime the other repositories depend on.
+
+| Sibling | Relationship |
+|:--------|:-------------|
+| **[VisionFlow](https://github.com/DreamLab-AI/VisionFlow)** | Coordination canon. Records this repository as a private supporting study; source and offline tests here do not establish hardware acceptance or delivered force. |
+| **[VisionClaw](https://github.com/DreamLab-AI/VisionClaw)** | Intended later consumer: a 6-DoF pose and button input for selecting nodes in the graph. Nothing is wired and no interface is committed. |
+| **[Codescape](https://github.com/DreamLab-AI/codescape)** | A possible later consumer through the same node-selection input, as Codescape shares VisionClaw's position wire. Not planned or built. |
+
+---
 
 ## Status
 
@@ -113,3 +145,13 @@ RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps
 
 Every crate enables `missing_docs`. HAL calls perform real I/O; the SDK, effects
 and all documentation examples are hardware-free.
+
+---
+
+<div align="center">
+
+**Part of [VisionFlow](https://github.com/DreamLab-AI/VisionFlow)**: a private study of a haptic arm for the lab's installation. [VisionClaw](https://github.com/DreamLab-AI/VisionClaw) is the intended graph it would select nodes in, and [Codescape](https://github.com/DreamLab-AI/codescape) shares that wire. The rest of the mesh, [agentbox](https://github.com/DreamLab-AI/agentbox), [solid-pod-rs](https://github.com/DreamLab-AI/solid-pod-rs), the [forum](https://github.com/DreamLab-AI/nostr-rust-forum) and [Loom](https://github.com/DreamLab-AI/loom), does not depend on it.
+
+[Governing document](docs/BASELINE-visiontouch-rs.md) · [Decision ledger](docs/adr/README.md) · [Charter](docs/charter.md)
+
+</div>
