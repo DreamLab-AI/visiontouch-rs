@@ -34,10 +34,12 @@ def main():
     parser.add_argument("--list", action="store_true", help="list responding instances without mutating them")
     args = parser.parse_args()
     runtime = os.environ.get("XDG_RUNTIME_DIR")
-    directory = Path(runtime) / "visiontouch-studio" if runtime else Path(f"/tmp/visiontouch-studio-{os.getuid()}")
+    directories = {Path(f"/tmp/visiontouch-studio-{os.getuid()}")}
+    if runtime:
+        directories.add(Path(runtime) / "visiontouch-studio")
     if args.list or not args.socket:
         live = []
-        for path in sorted(directory.glob("*.sock")):
+        for path in sorted({p for directory in directories for p in directory.glob("*.sock")}):
             try:
                 response = exchange(path, {"action": "status"})
                 if response.get("ok"):
