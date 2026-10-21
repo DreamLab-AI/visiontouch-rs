@@ -260,6 +260,35 @@ pub fn lockin(samples: &[(f64, [f64; 3])], drive_hz: f64) -> LockInResult {
     }
 }
 
+// P-0069: retain the bracketing sample, then interpolate at the time boundary.
+// Startup uses the available span. Sampling gaps still have their own interlock.
+fn window_velocity(history: &mut VecDeque<(f64, V)>, t: f64, position: V) -> V {
+    if !position.iter().all(|x| x.is_finite()) {
+        return [0.; 3];
+    }
+    if history.back().is_some_and(|(last, _)| *last == t) {
+        history.pop_back();
+    }
+    history.push_back((t, position));
+    let boundary = t - VEL_WINDOW_S;
+    while history.len() > 2 && history[1].0 <= boundary {
+        history.pop_front();
+    }
+    let (mut t0, mut p0) = history[0];
+    if t0 < boundary && history.len() > 1 {
+        let (t1, p1) = history[1];
+        let fraction = (boundary - t0) / (t1 - t0);
+        p0 = std::array::from_fn(|i| p0[i] + fraction * (p1[i] - p0[i]));
+        t0 = boundary;
+    }
+    let span = t - t0;
+    if span < VEL_MIN_SPAN_S {
+        [0.; 3]
+    } else {
+        sub(position, p0).map(|d| d / span)
+    }
+}
+
 /// Band-passed Y-velocity oscillation detector: 5 to 60 Hz, RMS over 0.5 s.
 #[derive(Debug, Default)]
 pub struct Oscillation {
@@ -444,27 +473,7 @@ impl Controller {
         let a = self.active.as_mut()?;
         let t = input.now.saturating_duration_since(a.started).as_secs_f64();
         let dt = input.interval_s.max(1e-4);
-        // Interlock velocity: displacement over a fixed time window rather than a
-        // mean of the last four samples. A four-sample mean spans 10 ms only at the
-        // nominal 2.4 ms cadence; an unpaced loop at 0.28 ms shrank it to 1 ms and
-        // turned encoder quantisation into a phantom 50 mm/s (P-0065). The window
-        // is measured in seconds, so cadence cannot change what the interlock sees.
-        if input.position.iter().all(|x| x.is_finite()) {
-            a.vel_buf.push_back((t, input.position));
-        }
-        while a
-            .vel_buf
-            .front()
-            .is_some_and(|(t0, _)| t - t0 > VEL_WINDOW_S && a.vel_buf.len() > 2)
-        {
-            a.vel_buf.pop_front();
-        }
-        let vel: V = match (a.vel_buf.front(), a.vel_buf.back()) {
-            (Some((t0, p0)), Some((t1, p1))) if t1 - t0 >= VEL_MIN_SPAN_S => {
-                sub(*p1, *p0).map(|d| d / (t1 - t0))
-            }
-            _ => [0.; 3],
-        };
+        let vel = window_velocity(&mut a.vel_buf, t, input.position);
 
         // Interlocks, most specific first.
         let mut stop = a.pending;
@@ -684,6 +693,75 @@ mod tests {
             axis: Axis::Y,
             sign: Sign::Neg,
             rung,
+        }
+    }
+
+    #[test]
+    fn velocity_window_interpolates_boundary_at_irregular_cadence() {
+        let mut history = VecDeque::new();
+        // Piecewise-linear positions with the boundary at 2.4 ms, between samples.
+        for (t, x) in [
+            (0., 0.),
+            (0.002, 0.00001),
+            (0.005, 0.00007),
+            (0.008, 0.00016),
+        ] {
+            window_velocity(&mut history, t, [x, -x, 0.]);
+        }
+        let v = window_velocity(&mut history, 0.012, [0.00032, -0.00032, 0.]);
+        let expected = (0.00032 - 0.000018) / VEL_WINDOW_S;
+        assert!((v[0] - expected).abs() < 1e-12);
+        assert!((v[1] + expected).abs() < 1e-12);
+        assert_eq!(history.front().unwrap().0, 0.002);
+        // Duplicate timestamps must not leak storage or divide by zero.
+        let len = history.len();
+        for _ in 0..100 {
+            assert_eq!(
+                window_velocity(&mut history, 0.012, [0.00032, -0.00032, 0.]),
+                v
+            );
+        }
+        assert_eq!(history.len(), len);
+    }
+
+    #[test]
+    fn velocity_window_startup_and_constant_speed_at_multiple_cadences() {
+        for dt in [0.00028, 0.0024, 0.0025, 0.006] {
+            let mut history = VecDeque::new();
+            for n in 0..1000 {
+                let t = f64::from(n) * dt;
+                let v = window_velocity(&mut history, t, [0.04 * t, 0., 0.]);
+                let expected = if t < VEL_MIN_SPAN_S { 0. } else { 0.04 };
+                assert!((v[0] - expected).abs() < 1e-12);
+            }
+            assert!(history.len() <= (VEL_WINDOW_S / dt).ceil() as usize + 2);
+        }
+    }
+
+    #[test]
+    fn registered_liveness_acceleration_still_trips_speed_with_exact_window() {
+        let csv =
+            include_str!("../../../docs/evidence/registered-liveness-20261017/0001-liveness.csv");
+        let header: Vec<_> = csv.lines().next().unwrap().split(',').collect();
+        let index = |name| header.iter().position(|c| *c == name).unwrap();
+        let mut r = Rig::new(2.4);
+        r.start(StepRequest::Liveness { channel: 0 }, 0.);
+        let lines: Vec<_> = csv.lines().skip(1).collect();
+        for (n, line) in lines.iter().enumerate() {
+            let columns: Vec<_> = line.split(',').collect();
+            let value = |name| columns[index(name)].parse::<f64>().unwrap();
+            let mut input = r.input();
+            input.now = r.base + Duration::from_secs_f64(value("t_s"));
+            input.interval_s = value("interval_us") / 1e6;
+            input.position = ["x_m", "y_m", "z_m"].map(value);
+            let out = r.c.tick(&input).unwrap();
+            if n + 1 == lines.len() {
+                assert_eq!(out.stop, Some(StopReason::Speed));
+                assert!((norm(out.velocity) - 0.053667003878941764).abs() < 1e-9);
+                assert!(matches!(out.demand, Demand::Channels([0, 0, 0])));
+            } else {
+                assert_eq!(out.stop, None, "row {n}");
+            }
         }
     }
 

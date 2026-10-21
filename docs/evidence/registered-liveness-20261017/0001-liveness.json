@@ -1,0 +1,85 @@
+{
+  "schema": 2,
+  "kind": "haptics-verification-attempt",
+  "session_id": "c106a223-2d38-4c45-9d67-06bd38f72b8e",
+  "attempt_id": 1,
+  "step": "liveness",
+  "params": {
+    "channel": 0,
+    "counts": 80,
+    "csv_row_every": 1,
+    "duration_s": 2.0,
+    "hz": 3.0
+  },
+  "started_utc": "2026-10-17T11:50:59Z",
+  "duration_s": 0.063278636,
+  "software": {
+    "git_commit": "0d0ec22ff2ecbcdec9db4390fcc5bec777d08ffe",
+    "sdk": {
+      "max_force_n": 2.0,
+      "max_dac": 300,
+      "slew_n_s": 100.0,
+      "timeout_ms": 25,
+      "unit_derating": 1.0
+    }
+  },
+  "limits": {
+    "force_n": 0.5,
+    "slew_n_s": 100.0,
+    "dac_counts": 96
+  },
+  "registration": {
+    "reset_counts": [
+      2339,
+      625,
+      44,
+      -91,
+      8,
+      -173
+    ],
+    "captured_utc": "2026-10-17T11:49:05Z"
+  },
+  "stop": {
+    "reason": "speed",
+    "detail": "phase square_hi at 0.06 s, position [0.002545893357304956, 8.878327813374215e-5, -0.0002594902347392847]"
+  },
+  "telemetry_summary": {
+    "samples": 19,
+    "max_interval_ms": 18.249934999999997,
+    "stale_ticks": 0,
+    "force_capped_ticks": 0,
+    "dac_capped_ticks": 0,
+    "max_abs_offsets": [
+      80,
+      0,
+      0
+    ]
+  },
+  "auto": {
+    "lockin_amplitude_counts": 0.3158633448301753,
+    "noise_counts": 0.7662234652833613,
+    "lockin_encoder": 0,
+    "lockin_pass": false,
+    "sign_agrees": null,
+    "liftoff_force_n": null,
+    "k_marginal_n_mm": null,
+    "oscillation": false
+  },
+  "operator": {
+    "readings": [],
+    "felt": null,
+    "heard": null,
+    "note": ""
+  },
+  "verdict": {
+    "kind": "auto-fail",
+    "pass": false,
+    "rule": "pass: m >= 0.8c-0.05; over: m > 1.2c+0.05 or oscillation; else under",
+    "unlocks": []
+  },
+  "csv": {
+    "file": "0001-liveness.csv",
+    "sha256": "33bb220247fe9c93987c46554e255fc37706cdad8d6f6eb22a0b92700c469556"
+  },
+  "claim": "Commands are model values; delivered force only from operator readings"
+}
