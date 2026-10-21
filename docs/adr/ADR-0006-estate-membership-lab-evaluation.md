@@ -7,7 +7,7 @@ implementation_status: complete
 activation_status: live
 supersedes: []
 superseded_by: []
-verified_commit: 990beb0cf8acfb48013fe0f5c04e688f45248c9e
+verified_commit: 08c6f1bb688a9daf8cfbe89488557a2878cf86cf
 verified_paths: [AGENTS.md, README.md, docs/legal/POSITION.md]
 owner: jjohare
 review_trigger: any intent to publish the repository, distribute software, demonstrate outside the lab, or begin the VisionClaw integration
@@ -55,3 +55,7 @@ ADR in both ledgers.
 ADR-2017, the roster row, the repository-map row, the website card and the
 diagrams area `docs/diagrams/visiontouch-rs` (VT-01 to VT-08) at VisionFlow
 commit 1e3bdd0 (re-stamped at fee91eb).
+
+Rechecked 21 October 2026: the README refresh at 08c6f1b preserves the private
+lab posture, distinguishes simulation from physical acceptance and introduces no
+new integration or distribution claim.
