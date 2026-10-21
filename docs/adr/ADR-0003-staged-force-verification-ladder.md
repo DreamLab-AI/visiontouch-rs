@@ -7,7 +7,7 @@ implementation_status: complete
 activation_status: staged
 supersedes: []
 superseded_by: []
-verified_commit: 253ea4c118e86767c98beb30a42f1ff8b86247a6
+verified_commit: 3f9f2dd8657fc4cadb29e29aea3a6b80b5991c91
 verified_paths: [apps/calibration/src/protocol.rs, apps/calibration/src/controller.rs, docs/spec/14-force-calibration.md]
 owner: jjohare
 review_trigger: a committed OWNER verification record (docs/evidence/force-verification-*), after which the per-session ladder may become a spot check
@@ -76,3 +76,9 @@ run pass with the spec 18 gradual channel diagnostic. Dedicated tests cover
 signed ramp endpoints, registration and fresh-hold prerequisites, immediate
 stop paths, recorded observations and absence of force-step unlocks. The fixed
 40-count diagnostic does not change force ceilings or prove physical motion.
+
+The P-0069 boundary interpolation correction also passes the full gate and
+25-attempt simulator smoke run. Regression tests cover irregular cadence,
+startup, duplicate timestamps and a preserved registered owner-host trace. That
+trace still triggers the unchanged 50 mm/s speed stop. No new physical trial or
+force calibration is claimed.
