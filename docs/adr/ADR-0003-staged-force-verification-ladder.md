@@ -7,7 +7,7 @@ implementation_status: complete
 activation_status: staged
 supersedes: []
 superseded_by: []
-verified_commit: 5e658b8e02f094f022eb7268b766489a9c2b0206
+verified_commit: 253ea4c118e86767c98beb30a42f1ff8b86247a6
 verified_paths: [apps/calibration/src/protocol.rs, apps/calibration/src/controller.rs, docs/spec/14-force-calibration.md]
 owner: jjohare
 review_trigger: a committed OWNER verification record (docs/evidence/force-verification-*), after which the per-session ladder may become a spot check
@@ -70,3 +70,9 @@ Recorded at the commit above: `cargo test -p visiontouch-studio`
 every step against the simulated plant). Physical verification is the owner's
 session per the spec appendix; its records become OWNER rows and a
 `docs/evidence/force-verification-<date>/` directory.
+
+2026-10-21 verification: the full quality gate and 25-attempt simulator smoke
+run pass with the spec 18 gradual channel diagnostic. Dedicated tests cover
+signed ramp endpoints, registration and fresh-hold prerequisites, immediate
+stop paths, recorded observations and absence of force-step unlocks. The fixed
+40-count diagnostic does not change force ceilings or prove physical motion.
