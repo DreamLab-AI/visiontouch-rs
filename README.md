@@ -50,6 +50,9 @@ visiontouch-rs is a supporting study in the [VisionFlow](https://github.com/Drea
 
 ## Status
 
+**Reviewed 21 October 2026 at committed revision `6402fbe`.** The last README change was 19 October; the next commit only re-stamped a decision record. The current worktree also contains unfinished Calibration Studio/onboarding edits. Those edits are not a new hardware acceptance result, and this review has not opened the device.
+
+
 | Area | State |
 |---|---|
 | Transport (software EPP over ppdev) | Verified live: setup, 16-byte packets, six encoder counters, stylus button, zero-only arming handshake, acknowledged motor packets (P-0021 to P-0030) |
@@ -57,6 +60,23 @@ visiontouch-rs is a supporting study in the [VisionFlow](https://github.com/Drea
 | Delivered force | **Unmeasured.** The 2026-10-16 envelope commanded less than backdrive friction and released output after 0.6 s (P-0060). The rebuilt envelope and the staged verification ladder in `docs/spec/14-force-calibration.md` are offline-tested and await the owner's attended session |
 | Wrist (gimbal) | Three encoders read; no torque output |
 | Real time | About 420 Hz servo on the owner's host, no deadline misses observed in short runs; no hard real-time claim |
+
+## Architecture
+
+```mermaid
+flowchart LR
+    UI["Calibration Studio or Mass Lab"] -->|"Intent and bounded demand"| SDK["Device SDK: registration, kinematics, force guard"]
+    SDK --> HAL["HAL: ppdev and EPP packet lifecycle"]
+    HAL --> HW["Owned haptic arm"]
+    HW -->|"Encoder and button samples"| HAL
+    HAL --> SDK
+    SDK --> UI
+    SIM["Simulated plant"] -.->|"Offline Studio path"| UI
+    UI -->|"After zero and disarm"| EV["Session evidence"]
+    EV --> VIEW["Offline viewer and review"]
+```
+
+The worker owns device I/O; the interface sends intent. A commanded value in the SDK is a model output, not measured force. The future graph-input path remains a proposal with no committed integration interface.
 
 ## Layout
 
@@ -75,19 +95,32 @@ archive/            gitignored local holding area
 
 ## Running
 
-Everything below is offline except the launchers that name `/dev/parport0`.
+Start without hardware. These commands exercise the toolchain, simulator or recorded data:
 
 ```sh
-scripts/quality-gate.sh                 # fmt, clippy, tests, strict rustdoc, viewer, audio, ADR ledger
-scripts/run-calibration --demo          # Calibration Studio against a simulated plant, no hardware
-scripts/run-calibration                 # connect input-only; motor output stays off until a held step
-scripts/run-mass-lab --no-device        # physics sandbox without the device
-scripts/run-workspace-viewer            # http://127.0.0.1:8765, replays the recorded sweep
-cargo build -p device-readout && scripts/with-port-access timeout -s KILL 10s target/debug/device-readout /dev/parport0 50
+scripts/quality-gate.sh
+scripts/run-calibration --demo
+scripts/run-mass-lab --no-device
+scripts/run-workspace-viewer
+```
+
+The viewer serves at `http://127.0.0.1:8765`. The [Studio guide](apps/calibration/README.md) and [guided-session specification](docs/spec/16-guided-onboarding.md) explain registration, current step state and evidence. A simulator result cannot clear a physical calibration requirement.
+
+<details>
+<summary><strong>Owner-host hardware path</strong></summary>
+
+Physical tests are attended and run on the owner's host, following the [force-verification runbook](docs/spec/14-force-calibration.md). They are separate from the commands above and from CI.
+
+```sh
+scripts/run-calibration  # connects input-only; a held verification step is required for output
+cargo build -p device-readout
+scripts/with-port-access timeout -s KILL 10s target/debug/device-readout /dev/parport0 50
 ```
 
 `scripts/with-port-access` re-executes a command with the invoking user's current
 groups so the `lp`-owned device node is accessible without a reboot.
+
+</details>
 
 ## Calibration and force verification
 
@@ -130,12 +163,7 @@ workspace during powered steps.
 
 ## Legal summary
 
-Observation and black-box testing of lawfully owned software are permitted (UK
-CDPA 1988 s50BA; licence terms to the contrary are void under s296A); protocols
-and interfaces are not protected expression (*SAS v World Programming*).
-Decompilation is a logged last resort whose findings stay out of the paper
-(s50B(3)). The foundational MIT patent expired in 2013 and UK private and
-experimental use exemptions cover the rest. See `docs/legal/`.
+The repository's [applied legal position](docs/legal/POSITION.md), [charter](docs/charter.md) and [clean-room policy](docs/clean-room/POLICY.md) govern this private, non-economic study. Protocol facts require provenance before implementation; vendor artefacts are excluded from the tree. Decompilation is a logged last resort and its findings stay out of the paper. Any move towards distribution or external demonstration reopens the recorded review. This README does not grant a software licence or turn that project-specific position into general permission.
 
 ## Rust API documentation
 
@@ -143,8 +171,7 @@ experimental use exemptions cover the rest. See `docs/legal/`.
 RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps
 ```
 
-Every crate enables `missing_docs`. HAL calls perform real I/O; the SDK, effects
-and all documentation examples are hardware-free.
+Library crates enable `missing_docs`; strict rustdoc also covers apps and tools. HAL calls perform real I/O. Use the simulator and the documented offline checks for unattended verification; never infer device acceptance from documentation examples.
 
 ---
 
