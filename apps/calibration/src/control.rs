@@ -90,6 +90,7 @@ pub enum CaptureMark {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Test {
     Liveness { channel: usize },
+    ChannelRamp { channel: usize, sign: Sign },
     SignPulse { axis: Axis },
     Ladder { axis: Axis, sign: Sign, rung_n: f64 },
     Lift { mass_g: Option<f64> },
@@ -100,6 +101,7 @@ impl Test {
     fn request(self) -> Result<StepRequest, String> {
         Ok(match self {
             Self::Liveness { channel } => StepRequest::Liveness { channel },
+            Self::ChannelRamp { channel, sign } => StepRequest::ChannelRamp { channel, sign },
             Self::SignPulse { axis } => StepRequest::SignPulse { axis },
             Self::Ladder { axis, sign, rung_n } => StepRequest::Ladder {
                 axis,
@@ -457,6 +459,26 @@ mod tests {
         a.snapshot.stable = true;
         a
     }
+    #[test]
+    fn gradual_prepare_requires_registration_and_a_fresh_local_hold() {
+        let mut a = demo();
+        let request = || Request::Prepare {
+            test: Test::ChannelRamp {
+                channel: 2,
+                sign: Sign::Neg,
+            },
+        };
+        assert!(apply(&mut a, request()).is_err());
+        a.snapshot.session.registered = true;
+        a.snapshot.registered = true;
+        apply(&mut a, request()).unwrap();
+        assert!(a.pending.is_some());
+        assert!(!a.snapshot.feedback);
+        a.hold(true);
+        assert!(!a.held);
+        assert!(serde_json::from_str::<Request>(r#"{"action":"prepare","test":{"kind":"channel_ramp","channel":2,"sign":"neg","counts":100}}"#).is_err());
+    }
+
     #[test]
     fn refuses_holds_raw_demands_and_unknown_fields() {
         for body in [

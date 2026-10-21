@@ -191,6 +191,17 @@ fn left_panel(app: &mut App, ctx: &egui::Context) {
                         });
                     }
                 });
+                card(ui, "GRADUAL CHANNEL DIAGNOSTIC", |ui| {
+                    ui.label("Register first. Support the pen clear of obstructions. Select a drive, then freshly hold Space. Release to stop. 0 to 40 counts in 2 s, back to zero in 1 s. Channel/sign do not mean an axis/direction; no force steps unlock.");
+                    for channel in 0..3 {
+                        ui.horizontal(|ui| {
+                            for sign in [Sign::Pos, Sign::Neg] {
+                                let req = StepRequest::ChannelRamp { channel, sign };
+                                start_button(app, ui, req, &req.label());
+                            }
+                        });
+                    }
+                });
                 card(ui, "04 / REGISTER THE RESET POSE", |ui| {
                     ui.label("Arm level and square to the base front, far arm plumb. Hold still, then register.");
                     ui.label("Reset means this physical arm pose, not the middle of the working volume or the desk rest position.");

@@ -175,3 +175,15 @@ logs, frames and a hash manifest stay in the ignored
 `captures/calibration/camera/` directory. They are not synchronised to servo
 samples. A successfully extracted frame can still be the capture adapter's
 "No Video" screen; inspect the image before using it as evidence of arm motion.
+
+Gradual channel diagnostic (spec 18): register the physical reset pose first,
+then use the bench controls or prepare through the local API:
+
+```sh
+scripts/calibration-control '{"action":"prepare","test":{"kind":"channel_ramp","channel":2,"sign":"neg"}}'
+```
+
+Release and freshly hold Space locally to run. The fixed drive reaches 40 DAC
+counts over two seconds and returns to zero over one second. Channel 2 negative
+is an electrical command, not a verified vertical direction. This diagnostic
+records response but does not unlock force steps or establish delivered force.

@@ -53,7 +53,7 @@ pub struct ClassLimits {
 pub fn class_limits(class: Class) -> ClassLimits {
     let (speed, excursion, bound, hold) = match class {
         Class::Backdrive => (0.4, 0.15, 60., false),
-        Class::Liveness => (0.05, 0.015, 4., true),
+        Class::Liveness | Class::ChannelRamp => (0.05, 0.015, 4., true),
         Class::Sign => (0.05, 0.015, SIGN_BOUND_S, true),
         Class::Ladder => (0.05, 0.003, 4., true),
         Class::Lift => (0.05, 0.025, 60., true),
@@ -540,7 +540,7 @@ impl Controller {
         }
 
         let (planned, phase) = a.plan.demand(t, dt, input.position, vel);
-        let zero = if a.class == Class::Liveness {
+        let zero = if matches!(a.class, Class::Liveness | Class::ChannelRamp) {
             Demand::Channels([0; 3])
         } else {
             Demand::Force([0.; 3])
@@ -685,6 +685,51 @@ mod tests {
             sign: Sign::Neg,
             rung,
         }
+    }
+
+    #[test]
+    fn gradual_drive_stops_immediately_and_never_scores_periodic_liveness() {
+        let req = StepRequest::ChannelRamp {
+            channel: 2,
+            sign: Sign::Neg,
+        };
+        for cause in 0..5 {
+            let mut r = Rig::new(2.4);
+            r.start(req, 0.);
+            for _ in 0..100 {
+                assert!(r.tick(|_| {}).stop.is_none());
+            }
+            let out = r.tick(|i| match cause {
+                0 => i.held = false,
+                1 => i.interval_s = 0.026,
+                2 => i.ui_age_ms = 300.,
+                3 => i.position[0] = 0.016,
+                _ => i.position[0] = 0.001,
+            });
+            assert!(out.stop.is_some(), "cause {cause}");
+            assert!(matches!(out.demand, Demand::Channels([0, 0, 0])));
+            assert!(r.c.active().is_none());
+            assert_eq!(r.c.take_outcome().unwrap().auto.lockin_pass, None);
+        }
+        let mut r = Rig::new(2.4);
+        r.start(req, 0.);
+        assert_eq!(r.run_until_stop(|_, _| {}), StopReason::Completed);
+        assert_eq!(r.c.take_outcome().unwrap().auto.lockin_pass, None);
+        let mut r = Rig::new(2.4);
+        let mut input = r.input();
+        input.registered = None;
+        assert!(
+            r.c.start(
+                req,
+                Allowance {
+                    limits: ForceLimits::default(),
+                    cap_n: 0.
+                },
+                &input,
+                None
+            )
+            .is_err()
+        );
     }
 
     #[test]

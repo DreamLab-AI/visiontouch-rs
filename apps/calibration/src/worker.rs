@@ -957,6 +957,7 @@ impl<H: Hardware> Engine<H> {
                 .into();
                 entry = Some(EntryKind::Reading);
             }
+            StepRequest::ChannelRamp { .. } => entry = Some(EntryKind::Observation),
             StepRequest::Backdrive => entry = Some(EntryKind::Reading),
             StepRequest::Effect { .. } => entry = Some(EntryKind::Observation),
         }
@@ -1329,6 +1330,42 @@ fn run(
 mod tests {
     use super::*;
     use crate::sim::{SimHw, SimPlant};
+
+    #[test]
+    fn gradual_drive_records_response_without_unlocking_force_steps() {
+        let root = std::env::temp_dir().join(format!("ramp-{}", evidence::new_session_id()));
+        let mut e: Engine<SimHw> = Engine::new(root.clone(), true);
+        e.connect(SimHw::new(SimPlant::default()));
+        for _ in 0..300 {
+            e.step(true, 0.).unwrap();
+        }
+        e.handle(Command::RegisterReset);
+        assert!(e.snapshot().registered, "{}", e.status());
+        e.step(true, 0.).unwrap();
+        let before = e.snapshot().session.unlocked();
+        e.handle(Command::Start(StepRequest::ChannelRamp {
+            channel: 2,
+            sign: crate::protocol::Sign::Neg,
+        }));
+        assert!(e.active().is_some(), "{}", e.status());
+        while e.active().is_some() {
+            e.step(true, 0.).unwrap();
+        }
+        e.handle(Command::SubmitObservation {
+            attempt_id: 1,
+            felt: Some(true),
+            heard: Some(true),
+            note: "diagnostic".into(),
+        });
+        assert_eq!(e.snapshot().session.unlocked(), before);
+        assert_eq!(e.snapshot().session.liveness, [None; 3]);
+        assert_eq!(e.done[0].record.auto.lockin_pass, None);
+        assert_eq!(e.done[0].record.verdict.pass, None);
+        assert_eq!(e.done[0].record.operator.felt, Some(true));
+        assert!(!e.snapshot().feedback);
+        assert!(e.done[0].record.telemetry_summary.samples > 0);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn captured_liveness_traces_no_longer_trip_speed_at_any_cadence() {

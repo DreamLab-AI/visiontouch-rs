@@ -166,6 +166,13 @@ pub enum StepRequest {
         /// Channel 0 to 2.
         channel: usize,
     },
+    /// Fixed 40-count diagnostic ramp; never unlocks a force step.
+    ChannelRamp {
+        /// Raw channel 0 to 2, not a Cartesian axis.
+        channel: usize,
+        /// Electrical drive sign, not a Cartesian direction.
+        sign: Sign,
+    },
     /// +0.25 N for 300 ms, 200 ms zero, -0.25 N for 300 ms.
     SignPulse {
         /// Axis tested.
@@ -203,6 +210,8 @@ pub enum StepKind {
     Backdrive,
     /// Channel liveness.
     Liveness,
+    /// Standalone gradual channel diagnostic.
+    ChannelRamp,
     /// Sign pulses.
     SignPulse,
     /// One ladder rung.
@@ -222,6 +231,7 @@ impl StepKind {
         match self {
             Self::Backdrive => "Backdrive".into(),
             Self::Liveness => "Liveness".into(),
+            Self::ChannelRamp => "Gradual channel diagnostic".into(),
             Self::SignPulse => "Sign pulses".into(),
             Self::Ladder(r) => format!("Rung {}", r.name()),
             Self::Lift => "Lift test".into(),
@@ -239,6 +249,8 @@ pub enum Class {
     Backdrive,
     /// Raw channel test.
     Liveness,
+    /// Registered raw-channel ramp.
+    ChannelRamp,
     /// Sign pulse.
     Sign,
     /// Ladder rung.
@@ -259,6 +271,7 @@ impl StepRequest {
         match self {
             Self::Backdrive => StepKind::Backdrive,
             Self::Liveness { .. } => StepKind::Liveness,
+            Self::ChannelRamp { .. } => StepKind::ChannelRamp,
             Self::SignPulse { .. } => StepKind::SignPulse,
             Self::Ladder { rung, .. } => StepKind::Ladder(rung),
             Self::Lift { .. } => StepKind::Lift,
@@ -272,6 +285,7 @@ impl StepRequest {
         match self {
             Self::Backdrive => Class::Backdrive,
             Self::Liveness { .. } => Class::Liveness,
+            Self::ChannelRamp { .. } => Class::ChannelRamp,
             Self::SignPulse { .. } => Class::Sign,
             Self::Ladder { .. } => Class::Ladder,
             Self::Lift { .. } => Class::Lift,
@@ -285,6 +299,7 @@ impl StepRequest {
         match self {
             Self::Backdrive => "backdrive",
             Self::Liveness { .. } => "liveness",
+            Self::ChannelRamp { .. } => "channel-ramp",
             Self::SignPulse { .. } => "sign",
             Self::Ladder { .. } => "ladder",
             Self::Lift { .. } => "lift",
@@ -298,6 +313,7 @@ impl StepRequest {
         match self {
             Self::Backdrive => "Backdrive".into(),
             Self::Liveness { channel } => format!("Liveness ch{channel}"),
+            Self::ChannelRamp { channel, sign } => format!("Gradual ch{channel} {}", sign.name()),
             Self::SignPulse { axis } => format!("Sign pulse {}", axis.name()),
             Self::Ladder { axis, sign, rung } => {
                 format!("Rung {} {}{}", rung.name(), sign.name(), axis.name())
@@ -314,6 +330,10 @@ impl StepRequest {
         use serde_json::json;
         match self {
             Self::Backdrive => json!({}),
+            Self::ChannelRamp { channel, sign } => json!({
+                "channel": channel, "sign": sign, "peak_counts": 40,
+                "ramp_up_s": 2.0, "ramp_down_s": 1.0, "zero_s": 0.5
+            }),
             Self::Liveness { channel } => json!({
                 "channel": channel, "counts": LIVENESS_COUNTS, "hz": LIVENESS_HZ, "duration_s": LIVENESS_S
             }),
@@ -611,7 +631,10 @@ impl Session {
                 limits: ForceLimits::default(),
                 cap_n: 0.,
             }),
-            StepRequest::Liveness { channel } => {
+            StepRequest::Liveness { channel } | StepRequest::ChannelRamp { channel, .. } => {
+                if matches!(req, StepRequest::ChannelRamp { .. }) && !self.registered {
+                    return Err("Register the reset pose first.".into());
+                }
                 if channel > 2 {
                     return Err("Channel must be 0, 1 or 2.".into());
                 }
@@ -669,7 +692,7 @@ impl Session {
             }
         }
     }
-    /// Every step kind that would be accepted now.
+    /// Staged verification steps accepted now (excludes the standalone ramp diagnostic).
     pub fn unlocked(&self) -> Vec<StepKind> {
         let probes = [
             StepRequest::Backdrive,
@@ -846,6 +869,7 @@ impl Plan {
         match self.req {
             StepRequest::Backdrive | StepRequest::Effect { .. } => None,
             StepRequest::Liveness { .. } => Some(LIVENESS_S),
+            StepRequest::ChannelRamp { .. } => Some(3.5),
             StepRequest::SignPulse { .. } => Some(1.0),
             StepRequest::Ladder { .. } => Some(4.0),
             StepRequest::Lift { .. } => Some(lift_ramp_end_s(self.cap_n) + 1.),
@@ -871,6 +895,18 @@ impl Plan {
         let zero = Demand::Force([0.; 3]);
         match self.req {
             StepRequest::Backdrive => (zero, "backdrive"),
+            StepRequest::ChannelRamp { channel, sign } => {
+                let (fraction, phase) = if t < 2.0 {
+                    ((t / 2.0).max(0.0), "ramp_up")
+                } else if t < 3.0 {
+                    (3.0 - t, "ramp_down")
+                } else {
+                    (0.0, "zero")
+                };
+                let mut counts = [0; 3];
+                counts[channel.min(2)] = (40.0 * fraction * sign.factor()).round() as i16;
+                (Demand::Channels(counts), phase)
+            }
             StepRequest::Liveness { channel } => {
                 if t >= LIVENESS_S {
                     return (Demand::Channels([0; 3]), "zero");
@@ -990,6 +1026,34 @@ pub(crate) mod tests {
             });
         }
         s
+    }
+
+    #[test]
+    fn gradual_drive_is_bounded_signed_and_returns_to_zero() {
+        for channel in 0..3 {
+            for sign in [Sign::Pos, Sign::Neg] {
+                let req = StepRequest::ChannelRamp { channel, sign };
+                let mut plan = Plan::new(req, 0., [0.; 3], None);
+                for (t, magnitude) in [(0., 0), (1., 20), (2., 40), (2.5, 20), (3., 0), (3.5, 0)] {
+                    let (demand, _) = plan.demand(t, 0.0024, [0.; 3], [0.; 3]);
+                    let mut expected = [0; 3];
+                    expected[channel] = (f64::from(magnitude) * sign.factor()) as i16;
+                    assert!(matches!(demand, Demand::Channels(c) if c == expected));
+                }
+                let mut session = Session {
+                    connected: true,
+                    ..Session::default()
+                };
+                assert!(session.check(req).is_err());
+                session.registered = true;
+                assert!(session.check(req).is_ok());
+                assert!(
+                    session
+                        .check(StepRequest::ChannelRamp { channel: 3, sign })
+                        .is_err()
+                );
+            }
+        }
     }
 
     #[test]
