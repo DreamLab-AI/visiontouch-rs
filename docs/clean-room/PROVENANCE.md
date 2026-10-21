@@ -124,3 +124,5 @@ code. Append-only; never rewrite history in this file.
 | P-0067 | 2026-10-21 | Owner requests direct local control of the calibration interface | OWNER / DESIGN | Owner conversation; docs/spec/17-local-control.md | owner / agent | Local JSON transport for existing UI operations. No remote hold, raw force command, limit override or automatic motor activation |
 
 | P-0068 | 2026-10-21 | Owner requests progressive attended motor motion; add a fixed gradual raw-channel diagnostic before planning volume motion | OWNER / DESIGN | Owner conversation; docs/spec/18-gradual-drive.md | owner / agent | 40-count peak, existing limits retained; no force calibration, channel-direction assumption or automatic unlock |
+
+| P-0069 | 2026-10-21 | Review finds the velocity deque discards the sample bracketing the 9.6 ms boundary; retain it and interpolate to implement the specified window | DESIGN | docs/spec/15-servo-cadence.md; controller regression tests | agent | No speed threshold change or physical test; startup uses available history and sample-gap stop remains independent |
