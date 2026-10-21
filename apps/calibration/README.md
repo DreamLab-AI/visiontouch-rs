@@ -99,3 +99,79 @@ and observations attach to that attempt automatically; a stop does not diagnose
 a failed motor. The guide offers a retry only for a released hold, not repeated
 speed or travel stops. Switching views cancels any prepared test. The guide uses
 the existing motor plans and interlocks and does not establish delivered force.
+
+## Local control API
+
+Every graphical Studio instance starts a user-private Unix socket at
+`$XDG_RUNTIME_DIR/visiontouch-studio/<pid>.sock` (fallback:
+`/tmp/visiontouch-studio-<uid>/<pid>.sock`). The directory is 0700, the socket 0600.
+There is no network listener. The PID and simulated/real mode are returned by
+status; select a socket explicitly if more than one instance is running.
+
+```sh
+scripts/calibration-control --list
+scripts/calibration-control status
+scripts/calibration-control '{"action":"view","bench":false}'
+scripts/calibration-control '{"action":"guide_next"}'
+scripts/calibration-control '{"action":"register_reference"}'
+scripts/calibration-control '{"action":"capture","mark":"return"}'
+scripts/calibration-control '{"action":"stop"}'
+```
+
+Send one JSON object followed by a newline per connection. A successful reply
+contains `ok`, `disposition` and `state`. `dispatched_to_worker_check_status` means
+intent was sent, not that the worker completed it. Poll status and inspect
+`status`, `checks`, `registered`, `last_result` and `evidence_dir` for the result.
+`snapshot_age_ms` describes the cached worker snapshot; it is null before the
+first snapshot. A request expires before application if the UI cannot process it
+within one second. If a client times out, inspect status before retrying a mutation.
+
+| Action | Additional fields |
+|---|---|
+| `status`, `stop`, `connect`, `disconnect`, `guide_next` | none |
+| `view` | `bench`: boolean; cancels any prepared test |
+| `register_reference` | `replace`: defaults false; explicitly true to replace an existing reference |
+| `capture` | `mark`: `return`, `ruler_start`, `ruler_end`, `effect_centre` |
+| `arm_gravity` | none; input-only check |
+| `submit_ruler` | `axis`: `x`/`y`/`z`, `measured_mm`: signed number |
+| `observe` | `attempt_id`, `felt` and `heard`: boolean or null, optional `note` |
+| `readings` | `attempt_id`, `readings`: array of `{label,value,unit}`; units `N`, `G`, `C`, `Mm` |
+| `coverage` | `enabled`: boolean |
+| `export_coverage`, `start_backdrive` | none; output must be idle |
+| `prepare` | `test`: object from the table below; needs a fresh local hold |
+
+| Test kind | Additional fields |
+|---|---|
+| `liveness` | `channel`: 0, 1 or 2 |
+| `sign_pulse` | `axis`: `x`/`y`/`z` |
+| `ladder` | `axis`, `sign`: `pos`/`neg`, `rung_n`: 0.1, 0.25, 0.5, 1.0 or 2.0 |
+| `lift` | `mass_g`: null for bare, or positive up to 100 |
+| `effect` | `name`: an effect's displayed name |
+| `wall_ramp` | none |
+
+Example preparation (does not arm output):
+
+```sh
+scripts/calibration-control '{"action":"prepare","test":{"kind":"liveness","channel":0}}'
+```
+
+There is no API hold, raw demand, limit override, direct verdict, thermal Start or
+thermal Confirm. Power still requires a fresh local Space/button hold. Navigation
+and Stop cancel preparation. Worker checks, force limits and evidence rules are
+unchanged. Same-user processes are trusted like the local interface. Headless
+smoke tests do not start a server.
+
+## Short camera sequences
+
+```sh
+scripts/capture-camera --seconds 3 --fps 2
+scripts/capture-camera --device /dev/video0 --size 1920x1080 --seconds 6 --fps 1
+```
+
+These commands capture stills only while invoked, with a maximum ten-second
+recording after a default ten-second warm-up (`--warmup 0` to skip it). Use
+`--format yuyv422 --size 640x480` if the adapter delivers corrupt MJPEG. Decoder
+logs, frames and a hash manifest stay in the ignored
+`captures/calibration/camera/` directory. They are not synchronised to servo
+samples. A successfully extracted frame can still be the capture adapter's
+"No Video" screen; inspect the image before using it as evidence of arm motion.

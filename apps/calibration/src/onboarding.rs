@@ -62,6 +62,57 @@ pub struct Guide {
     replace_confirm: bool,
 }
 impl Guide {
+    pub fn state(&self) -> serde_json::Value {
+        serde_json::json!({"view": if self.bench { "bench" } else { "guide" },
+            "stage": format!("{:?}", self.stage).to_lowercase(), "title": self.stage.title(),
+            "channel": self.channel, "capture_acknowledged": self.captured,
+            "movement_observed": self.moved, "waiting_reference": self.waiting_reference,
+            "waiting_capture": self.waiting_capture.is_some()})
+    }
+    pub fn reference_requested(&mut self) {
+        self.waiting_reference = true;
+    }
+    pub fn capture_requested(&mut self, s: &Snapshot) -> Result<(), String> {
+        if !self.bench && self.stage == Stage::Return && !self.moved {
+            return Err("Move away from the reference before capturing a return".into());
+        }
+        self.waiting_capture = Some(s.session.checks.returns.len());
+        self.captured = false;
+        Ok(())
+    }
+    /// Advance presentation only when the same evidence required by the buttons exists.
+    pub fn advance(&mut self, s: &Snapshot) -> Result<(), String> {
+        match self.stage {
+            Stage::Connect if s.connected && s.rate_hz >= 300. => self.stage = Stage::Pose,
+            Stage::Pose if s.registered => {
+                self.stage = Stage::Still;
+                self.captured = false;
+            }
+            Stage::Still if self.captured_ok(s) => {
+                self.stage = Stage::Return;
+                self.captured = false;
+                self.moved = false;
+            }
+            Stage::Return if self.captured_ok(s) && self.moved => {
+                self.stage = Stage::Motors;
+                self.captured = false;
+                self.after_attempt = s.last_result.as_ref().map_or(0, |r| r.attempt_id);
+            }
+            Stage::Motors if self.motor_passed(s) => {
+                self.channel += 1;
+                self.after_attempt = s.last_result.as_ref().map_or(0, |r| r.attempt_id);
+                self.felt = None;
+                self.heard = None;
+                self.note.clear();
+                if self.channel == 3 {
+                    self.stage = Stage::Measure;
+                }
+            }
+            Stage::Measure => self.bench = true,
+            _ => return Err("Complete the current guided task before advancing".into()),
+        }
+        Ok(())
+    }
     /// Synchronise only with acknowledged worker evidence; button presses are not passes.
     pub fn sync(&mut self, s: &Snapshot) {
         if !s.connected && self.connected {
@@ -213,9 +264,17 @@ fn pose_diagram(ui: &mut egui::Ui) {
     );
 }
 
+fn advance_guide(app: &mut App) {
+    if let Err(e) = app.guide.advance(&app.snapshot) {
+        app.notice = e;
+    }
+}
+
 fn capture(app: &mut App) {
-    app.guide.waiting_capture = Some(app.snapshot.session.checks.returns.len());
-    app.guide.captured = false;
+    if let Err(e) = app.guide.capture_requested(&app.snapshot) {
+        app.notice = e;
+        return;
+    }
     app.send(Command::CaptureStill(Mark::ReturnToReset));
 }
 fn replace_reference(app: &mut App, ui: &mut egui::Ui, idle: bool) {
@@ -269,7 +328,7 @@ pub fn panel(app: &mut App, ctx: &egui::Context) {
                             ui.label(RichText::new(format!("Connected · {:.0} samples/s", app.snapshot.rate_hz)).color(GREEN));
                             ui.label(if app.snapshot.stable { "Pen is still" } else { "Pen is moving" });
                             note(ui, "The unregistered drawing is approximate. At this point, check that it responds to movement, not its exact shape or position.");
-                            if button(ui, idle && app.snapshot.rate_hz >= 300., "The view responds · continue") { app.guide.stage = Stage::Pose; }
+                            if button(ui, idle && app.snapshot.rate_hz >= 300., "The view responds · continue") { let _ = app.guide.advance(&app.snapshot); }
                         }
                     }
                     Stage::Pose => {
@@ -279,10 +338,10 @@ pub fn panel(app: &mut App, ctx: &egui::Context) {
                         ui.add_space(12.);
                         if app.snapshot.registered {
                             note(ui, "A reference already exists. Saving here replaces it and clears its checks.");
-                            if button(ui, idle, "Use the existing reference") { app.guide.stage = Stage::Still; app.guide.captured = false; }
+                            if button(ui, idle, "Use the existing reference") { let _ = app.guide.advance(&app.snapshot); }
                         }
                         if button(ui, ready && !app.guide.waiting_reference, if app.snapshot.registered { "Replace reference with this pose" } else { "Save this pose as zero" }) {
-                            app.guide.waiting_reference = true;
+                            app.guide.reference_requested();
                             app.send(Command::RegisterReset);
                         }
                         if !app.snapshot.stable { note(ui, "Waiting for a steady pen (a quarter of a second)."); }
@@ -310,10 +369,7 @@ pub fn panel(app: &mut App, ctx: &egui::Context) {
                             if app.guide.captured_ok(&app.snapshot) {
                                 ui.label(RichText::new("Within the 2 mm model tolerance").color(GREEN));
                                 if button(ui, idle, if returning { "Continue to motor checks" } else { "Now check a physical return" }) {
-                                    app.guide.stage = if returning { Stage::Motors } else { Stage::Return };
-                                    app.guide.captured = false;
-                                    app.guide.moved = false;
-                                    app.guide.after_attempt = app.snapshot.last_result.as_ref().map_or(0, |r| r.attempt_id);
+                                    advance_guide(app);
                                 }
                             } else {
                                 ui.label(RichText::new("Reference check needs attention").color(AMBER));
@@ -416,14 +472,7 @@ fn motors(app: &mut App, ui: &mut egui::Ui, ready: bool, idle: bool) {
                     "Prepare the next channel"
                 },
             ) {
-                app.guide.channel += 1;
-                app.guide.after_attempt = result.attempt_id;
-                app.guide.felt = None;
-                app.guide.heard = None;
-                app.guide.note.clear();
-                if app.guide.channel == 3 {
-                    app.guide.stage = Stage::Measure;
-                }
+                advance_guide(app);
             }
         } else {
             note(

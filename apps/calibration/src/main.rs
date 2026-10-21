@@ -4,6 +4,7 @@
 //! a motor command. Nothing here opens hardware except the default mode, and that
 //! connects with output off. `--demo` and `--smoke-test` use a simulated plant.
 mod arm;
+mod control;
 mod controller;
 mod coverage;
 mod evidence;
@@ -46,6 +47,7 @@ pub enum Backend {
 pub struct App {
     pub backend: Backend,
     pub snapshot: Snapshot,
+    pub snapshot_at: Option<Instant>,
     pub forms: ui::Forms,
     pub guide: onboarding::Guide,
     pub orbit: scene::Orbit,
@@ -74,6 +76,7 @@ impl App {
         Self {
             backend,
             snapshot: Snapshot::default(),
+            snapshot_at: None,
             forms: ui::Forms::default(),
             guide: onboarding::Guide::default(),
             orbit: scene::Orbit::default(),
@@ -129,6 +132,7 @@ impl App {
         if let Backend::Worker(w) = &self.backend {
             while let Ok(s) = w.snapshots.try_recv() {
                 self.snapshot = s;
+                self.snapshot_at = Some(Instant::now());
             }
         }
     }
@@ -162,6 +166,7 @@ impl App {
             }
         }
         self.snapshot = e.snapshot();
+        self.snapshot_at = Some(Instant::now());
     }
     /// Operator pressed a Start button.
     pub fn request(&mut self, req: StepRequest) {
@@ -282,6 +287,17 @@ fn main() {
 async fn graphical(demo: bool, no_device: bool) {
     prevent_quit();
     let mut app = App::new(demo, no_device);
+    let control = match control::Server::start() {
+        Ok(server) => {
+            eprintln!("Local calibration control: {}", server.path.display());
+            Some(server)
+        }
+        Err(e) => {
+            eprintln!("Local calibration control unavailable: {e}");
+            app.notice = format!("Local control unavailable: {e}");
+            None
+        }
+    };
     let mut previous = Vec2::from(mouse_position());
     let mut frame = 0_u32;
     loop {
@@ -289,6 +305,9 @@ async fn graphical(demo: bool, no_device: bool) {
             break;
         }
         app.poll();
+        if let Some(server) = &control {
+            server.pump(&mut app);
+        }
         clear_background(Color::from_rgba(10, 18, 27, 255));
         let mut out = None;
         egui_macroquad::ui(|ctx: &egui::Context| {

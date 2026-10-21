@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+"""One local Studio JSON request. Defaults to status; never synthesises a hold."""
+import argparse
+import json
+import os
+from pathlib import Path
+import socket
+import sys
+
+
+def exchange(path, request):
+    raw = json.dumps(request, allow_nan=False).encode() + b"\n"
+    if len(raw) > 8193:
+        raise ValueError("request exceeds 8192 bytes")
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        client.settimeout(4)
+        client.connect(str(path))
+        client.sendall(raw)
+        data = bytearray()
+        while b"\n" not in data:
+            chunk = client.recv(65536)
+            if not chunk:
+                raise ValueError("server closed without a response")
+            data.extend(chunk)
+            if len(data) > 1024 * 1024:
+                raise ValueError("response exceeds 1 MiB")
+        return json.loads(data.split(b"\n", 1)[0])
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("request", nargs="?", default='{"action":"status"}', help="JSON object, or 'status'")
+    parser.add_argument("--socket", type=Path, help="explicit Studio socket (required if several instances run)")
+    parser.add_argument("--list", action="store_true", help="list responding instances without mutating them")
+    args = parser.parse_args()
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    directory = Path(runtime) / "visiontouch-studio" if runtime else Path(f"/tmp/visiontouch-studio-{os.getuid()}")
+    if args.list or not args.socket:
+        live = []
+        for path in sorted(directory.glob("*.sock")):
+            try:
+                response = exchange(path, {"action": "status"})
+                if response.get("ok"):
+                    live.append({"socket": str(path), "pid": response["state"]["pid"], "simulated": response["state"]["simulated"]})
+            except (OSError, ValueError, KeyError):
+                continue
+        if args.list:
+            print(json.dumps(live, indent=2))
+            return 0
+        if len(live) != 1:
+            raise ValueError(f"Found {len(live)} responding instances; use --list and --socket to select one")
+        args.socket = Path(live[0]["socket"])
+    request = {"action": "status"} if args.request == "status" else json.loads(args.request)
+    result = exchange(args.socket, request)
+    print(json.dumps(result, indent=2))
+    return 0 if result.get("ok") else 1
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except (OSError, ValueError, KeyError) as error:
+        print(f"calibration-control: {error}", file=sys.stderr)
+        sys.exit(1)

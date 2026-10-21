@@ -1,0 +1,48 @@
+#!/usr/bin/env python3
+"""Extract a bounded sequence of camera stills; no audio or continuous recording."""
+import argparse
+from datetime import datetime, timezone
+import hashlib
+import json
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import uuid
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--device", default="/dev/video0")
+    parser.add_argument("--warmup", type=int, choices=range(0, 21), default=10, help="seconds to keep the input open before saving frames")
+    parser.add_argument("--format", choices=["mjpeg", "yuyv422"], default="mjpeg", help="camera input pixel format")
+    parser.add_argument("--seconds", type=int, choices=range(1, 11), default=3)
+    parser.add_argument("--fps", type=int, choices=range(1, 11), default=2, help="extracted frames per second")
+    parser.add_argument("--size", choices=["640x480", "1280x720", "1920x1080"], default="1280x720")
+    args = parser.parse_args()
+    if not shutil.which("ffmpeg"):
+        parser.error("ffmpeg is required")
+    now = datetime.now(timezone.utc)
+    root = Path(__file__).resolve().parent.parent / "captures/calibration/camera"
+    out = root / (now.strftime("%Y%m%dT%H%M%SZ-") + uuid.uuid4().hex[:8])
+    out.mkdir(parents=True)
+    command = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "warning", "-fflags", "+discardcorrupt", "-err_detect", "ignore_err", "-f", "v4l2", "-input_format", args.format, "-video_size", args.size, "-framerate", ("30" if args.format == "mjpeg" or args.size == "640x480" else "5"), "-i", args.device, "-ss", str(args.warmup), "-t", str(args.seconds), "-vf", f"fps={args.fps}", "-frames:v", str(args.seconds * args.fps), str(out / "frame-%03d.jpg")]
+    status = "complete"
+    try:
+        with (out / "ffmpeg.log").open("w") as log:
+            subprocess.run(command, check=True, timeout=args.warmup + args.seconds + 10, stdout=subprocess.DEVNULL, stderr=log)
+    except (subprocess.SubprocessError, OSError) as error:
+        status = str(error)
+    frames = [{"file": p.name, "sha256": hashlib.sha256(p.read_bytes()).hexdigest()} for p in sorted(out.glob("frame-*.jpg"))]
+    if status == "complete" and not frames:
+        status = "No frames decoded"
+    manifest = {"warmup_seconds": args.warmup, "input_format": args.format, "started_utc": now.isoformat(), "device": args.device, "size": args.size, "seconds": args.seconds, "extracted_fps": args.fps, "status": status, "frames": frames, "note": "Capture timestamps are not synchronised with servo samples. Inspect frames for signal validity."}
+    (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    print(out)
+    if status != "complete":
+        print(f"Capture incomplete: {status}. See {out / 'ffmpeg.log'}", file=sys.stderr)
+    return 0 if status == "complete" and frames else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
